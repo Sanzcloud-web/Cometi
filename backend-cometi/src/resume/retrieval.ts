@@ -26,6 +26,8 @@ export async function indexAndSelectTopChunks(
   const model = process.env.EMBEDDING_MODEL || 'text-embedding-3-small';
   const existing = (await getDocumentWithChunks(url)) as any;
   let doc: any = existing ?? (await upsertDocument(url, title));
+  // Ensure chunks is always an iterable array for downstream logic
+  if (!Array.isArray(doc?.chunks)) doc = { ...doc, chunks: [] };
 
   const docModelChanged = doc.embeddingModel && doc.embeddingModel !== model;
   const docUnchanged = doc.contentHash === pageHash && doc.chunkCount === chunks.length && !docModelChanged;
