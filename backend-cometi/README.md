@@ -7,6 +7,7 @@ API serverless pour relayer les requêtes vers OpenAI. Conçu pour être déploy
 1. Copie `.env.example` en `.env` (ou définis les variables dans le dashboard Vercel) :
    - `OPENAI_API_KEY` : ta clé OpenAI.
    - `OPENAI_MODEL` : identifiant de modèle (ex. `gpt-4o-mini`).
+   - `OPENAI_SUGGESTIONS_MODEL` : (optionnel) modèle dédié aux suggestions (défaut `gpt-4.1-nano`).
    - `ORIGIN` : domaine autorisé pour le CORS (ex. `chrome-extension://...`). Laisse `*` pour du debug.
    - (Optionnel) Embeddings pour le résumé: 
      - `DB_EMBEDDING` : URL PostgreSQL (Neon) ex: `postgresql://user:pass@host/db?sslmode=require`
@@ -26,7 +27,7 @@ API serverless pour relayer les requêtes vers OpenAI. Conçu pour être déploy
    npm run dev
    ```
 
-   L’API sera accessible sur `http://localhost:3000/api/chat` et `http://localhost:3000/api/resume`.
+   L’API sera accessible sur `http://localhost:3000/api/chat`, `http://localhost:3000/api/suggestions` et `http://localhost:3000/api/resume`.
    > Ce serveur de développement est un petit serveur Node.js (pas besoin du CLI Vercel).
 
 ### Activer la DB d’embeddings (PostgreSQL)
@@ -116,3 +117,31 @@ API serverless pour relayer les requêtes vers OpenAI. Conçu pour être déploy
 - **Erreurs** :
   - Statut 400 si l’URL est absente ou non HTTP(S).
   - Statut 500 si la récupération, l’extraction ou l’appel OpenAI échouent.
+
+### `POST /api/suggestions`
+
+- **Corps** :
+
+  ```json
+  {
+    "domain": "twitter.com",
+    "context": "Titre du post ou extrait",
+    "language": "fr"
+  }
+  ```
+
+  `context` et `language` sont optionnels. Si `language` n’est pas fourni, le français est utilisé.
+
+- **Réponse** :
+
+  ```json
+  {
+    "suggestions": [
+      { "id": 1, "label": "Résumer les commentaires" },
+      { "id": 2, "label": "Lister les points clés" }
+    ]
+  }
+  ```
+
+- **Erreurs** :
+  - Statut 500 si la clé API est absente ou si la réponse OpenAI n’est pas exploitable.
