@@ -115,28 +115,37 @@ export function useConversation() {
 
     const isResumeCommand = content === '/resume';
 
+    if (isResumeCommand) {
+      const placeholderId = getNextId();
+      // Append both user message and placeholder in a single state update
+      setMessages((prev) => [
+        ...prev,
+        userMessage,
+        { id: placeholderId, role: 'assistant', text: 'Analyse du contenu de la page en cours…' },
+      ]);
+
+      void (async () => {
+        try {
+          const summary = await requestResumeSummary();
+          const formatted = formatResumeSummary(summary);
+          updateAssistantMessage(placeholderId, formatted.text, { actions: formatted.actions });
+        } catch (error: unknown) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : 'Impossible de produire le résumé de la page active.';
+          updateAssistantMessage(placeholderId, message, { isError: true });
+        } finally {
+          setIsLoading(false);
+        }
+      })();
+
+      return;
+    }
+
+    // Regular chat flow
     setMessages((prev) => {
       const nextHistory = [...prev, userMessage];
-      if (isResumeCommand) {
-        void (async () => {
-          const placeholderId = appendAssistantMessage('Analyse du contenu de la page en cours…');
-          try {
-            const summary = await requestResumeSummary();
-            const formatted = formatResumeSummary(summary);
-            updateAssistantMessage(placeholderId, formatted.text, { actions: formatted.actions });
-          } catch (error: unknown) {
-            const message =
-              error instanceof Error
-                ? error.message
-                : 'Impossible de produire le résumé de la page active.';
-            updateAssistantMessage(placeholderId, message, { isError: true });
-          } finally {
-            setIsLoading(false);
-          }
-        })();
-
-        return nextHistory;
-      }
 
       void requestAssistantReply(nextHistory)
         .then((assistantReply) => {
