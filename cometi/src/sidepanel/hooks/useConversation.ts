@@ -1,9 +1,7 @@
 import { FormEvent, useRef, useState } from 'react';
 import { requestChatCompletion, requestChatCompletionStream } from '../services/chatClient';
-import { requestResumeSummary } from '../services/resumeCommand';
-import { requestResumeSummaryStream, extractPartialResumePreview } from '../services/resumeStream';
+import { requestResumeSummaryStream } from '../services/resumeStream';
 import type { ChromeChatMessage, ConversationMessage, MessageAction } from '../types/chat';
-import type { ResumeSummary } from '../types/resume';
 
 const SYSTEM_PROMPT: ChromeChatMessage = {
   role: 'system',
@@ -65,28 +63,7 @@ export function useConversation() {
     );
   };
 
-  const formatResumeSummary = (summary: ResumeSummary): { text: string; actions: MessageAction[] } => {
-    const header = summary.title ? `${summary.title}\n\n` : '';
-    const bullets = summary.tldr.map((item) => `• ${item}`).join('\n');
-    const sources = summary.usedSources.map((source, index) => `• Source ${index + 1} : ${source}`).join('\n');
-    const text =
-      `${header}TL;DR\n${bullets}\n\nRésumé\n${summary.summary}\n\nSources\n${sources}`.trim();
-
-    const actions: MessageAction[] = [
-      {
-        type: 'copy',
-        label: 'Copier le résumé',
-        value: text,
-      },
-      ...summary.usedSources.map<MessageAction>((source, index) => ({
-        type: 'open',
-        label: `Ouvrir source ${index + 1}`,
-        url: source,
-      })),
-    ];
-
-    return { text, actions };
-  };
+  // No JSON formatting; we stream and render plain text directly.
 
   const requestAssistantReply = async (history: ConversationMessage[], onStream?: (delta: string) => void) => {
     const payloadMessages: ChromeChatMessage[] = [
@@ -121,7 +98,7 @@ export function useConversation() {
 
     const isResumeCommand = content === '/resume';
 
-    if (isResumeCommand) {
+  if (isResumeCommand) {
       const placeholderId = getNextId();
       // Append both user message and placeholder in a single state update
       setMessages((prev) => [
@@ -134,6 +111,12 @@ export function useConversation() {
         try {
           let acc = '';
           let first = true;
+          const normalizeMd = (s: string) =>
+            s
+              // Ensure space after markdown headers like ##Title -> ## Title
+              .replace(/(^|\n)(#{1,6})(\S)/g, (_m, p1, p2, p3) => `${p1}${p2} ${p3}`)
+              // Ensure dash-space for lists: -Item -> - Item
+              .replace(/(^|\n)-(\S)/g, (_m, p1, p2) => `${p1}- ${p2}`);
           const summary = await requestResumeSummaryStream({
             onProgress: (e) => {
               // Optionally reflect stage in UI in the future
@@ -144,20 +127,18 @@ export function useConversation() {
             },
             onDelta: (delta) => {
               acc += delta;
-              const parsed = extractPartialResumePreview(acc);
-              const preview = parsed?.formatted ?? null;
-              if (preview && preview.trim().length > 0) {
-                if (first) {
-                  first = false;
-                  updateAssistantMessage(placeholderId, preview, { isLoading: false });
-                } else {
-                  updateAssistantMessage(placeholderId, preview);
-                }
+              const view = normalizeMd(acc);
+              if (first) {
+                first = false;
+                updateAssistantMessage(placeholderId, view, { isLoading: false });
+              } else {
+                updateAssistantMessage(placeholderId, view);
               }
             },
           });
-          const formatted = formatResumeSummary(summary);
-          updateAssistantMessage(placeholderId, formatted.text, { actions: formatted.actions });
+          const finalText = normalizeMd(summary);
+          const actions: MessageAction[] = [{ type: 'copy', label: 'Copier le résumé', value: finalText }];
+          updateAssistantMessage(placeholderId, finalText, { actions });
         } catch (error: unknown) {
           const message =
             error instanceof Error

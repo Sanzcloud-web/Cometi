@@ -11,7 +11,7 @@ API serverless pour relayer les requêtes vers OpenAI. Conçu pour être déploy
    - (Optionnel) Embeddings pour le résumé: 
      - `DB_EMBEDDING` : URL PostgreSQL (Neon) ex: `postgresql://user:pass@host/db?sslmode=require`
      - `EMBEDDING_MODEL` : par défaut `text-embedding-3-small`
-     - `RESUME_TOP_K` : nombre de chunks gardés (défaut `8`)
+     - `RESUME_TOP_K` : nombre de chunks gardés (défaut `6`)
      - `RESUME_QUERY` : requête d’ancrage (défaut `RESUME`)
 
 2. Installe les dépendances :

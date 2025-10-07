@@ -58,6 +58,66 @@ export function buildFinalSummaryPrompt(text: string, language: string, url: str
   ];
 }
 
+// Version texte (non-JSON) pour le streaming
+export function buildFinalSummaryTextPrompt(text: string, language: string, url: string): ChatMessage[] {
+  const systemPrompt =
+    "Tu es un assistant qui rédige un résumé clair, bien aéré et lisible en Markdown. Interdictions absolues: pas de JSON, pas de balises HTML, pas de blocs de code. Respecte strictement l'espacement normal entre les mots. Commence directement par le contenu demandé, sans préambule.";
+  const userPrompt = `Langue attendue : ${language}. À partir du contenu suivant provenant de ${url}, produis un résumé en Markdown avec la structure EXACTE suivante :\n\n` +
+    [
+      '## TL;DR',
+      '- 3 à 5 puces concises, une par ligne, chaque puce commence par "- " (tiret + espace).',
+      '',
+      '## Résumé',
+      'Un ou deux paragraphes (150 à 220 mots au total). Reste factuel et évite toute spéculation.',
+      '',
+      '(Ne mentionne pas de sources si elles ne sont pas fournies explicitement dans le contenu ci-dessous.)',
+      '',
+      'CONTENU :',
+      text,
+    ].join('\n');
+
+  return [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userPrompt },
+  ];
+}
+
+// Extremely simple text prompt: feed top chunks and ask for a concise summary in the target language.
+export function buildSimpleSummaryTextPromptFromChunks(
+  topChunks: string[],
+  language: string,
+  url: string
+): ChatMessage[] {
+  const systemPrompt =
+    [
+      `Tu es un assistant qui rédige des résumés clairs et lisibles en ${language}.`,
+      "Interdictions absolues: pas de JSON, pas de balises HTML, pas de blocs de code.",
+      "Respecte STRICTEMENT les espaces entre les mots et la ponctuation.",
+      "Insère des retours à la ligne (\n) pour séparer titres, puces et paragraphes.",
+      "Structure exactement comme suit et commence immédiatement par le contenu demandé:",
+      "## TL;DR",
+      "- 3 à 5 puces, chaque ligne commence par '- ' (tiret + espace).",
+      "",
+      "## Résumé",
+      "Un ou deux paragraphes concis (150 à 220 mots au total). Reste factuel, sans spéculation.",
+    ].join('\n');
+
+  const joined = topChunks.join('\n\n');
+  const userPrompt =
+    [
+      `Langue attendue : ${language}. À partir des extraits ci-dessous provenant de ${url}, rédige le résumé demandé avec la structure ci-dessus.`,
+      "N'invente pas d'informations. N'inclus pas de sources si elles ne sont pas explicitement présentes.",
+      '',
+      'EXTRAITS SÉLECTIONNÉS (max 6):',
+      joined,
+    ].join('\n');
+
+  return [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userPrompt },
+  ];
+}
+
 export async function generateSummary(
   paragraphs: string[],
   language: string,

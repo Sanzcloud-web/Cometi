@@ -3,7 +3,7 @@ import type { ResumeServiceEnv } from './types';
 import { embedTexts } from '../embeddings/openai';
 import { createHash } from 'node:crypto';
 
-const DEFAULT_TOP_K = Number(process.env.RESUME_TOP_K ?? 8);
+const DEFAULT_TOP_K = Number(process.env.RESUME_TOP_K ?? 6);
 
 export async function indexAndSelectTopChunks(
   url: string,

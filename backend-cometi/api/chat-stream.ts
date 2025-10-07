@@ -65,12 +65,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const parts = buffer.split('\n\n');
       buffer = parts.pop() ?? '';
       for (const part of parts) {
-        const trimmed = part.trim();
-        if (!trimmed) continue;
-        for (const l of trimmed.split('\n')) {
-          const line = l.trim();
-          if (!line.startsWith('data:')) continue;
-          const payload = line.replace(/^data:\s*/, '');
+        if (!part) continue;
+        for (const l of part.split('\n')) {
+          if (!l.startsWith('data:')) continue;
+          const payload = l.replace(/^data:\s?/, '');
           if (payload === '[DONE]') {
             res.write(`event: done\n`);
             res.write(`data: {}\n\n`);
@@ -101,4 +99,3 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.end();
   }
 }
-

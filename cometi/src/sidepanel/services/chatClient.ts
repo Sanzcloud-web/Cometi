@@ -139,12 +139,12 @@ export async function requestChatCompletionStream(
     const parts = buffer.split('\n\n');
     buffer = parts.pop() ?? '';
     for (const part of parts) {
-      const lines = part.trim().split('\n');
+      const lines = part.split('\n');
       let event: string | undefined;
       let data: string | undefined;
       for (const line of lines) {
         if (line.startsWith('event:')) event = line.replace(/^event:\s*/, '').trim();
-        if (line.startsWith('data:')) data = line.replace(/^data:\s*/, '').trim();
+        if (line.startsWith('data:')) data = line.replace(/^data:\s?/, '');
       }
       if (event === 'delta' && data) {
         try {

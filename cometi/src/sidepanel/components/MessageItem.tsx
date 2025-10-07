@@ -1,5 +1,6 @@
 import type { ConversationMessage, MessageAction } from '../types/chat';
 import { Card } from './ui/card';
+import { renderMarkdownToHtml } from '../utils/markdown';
 
 type MessageItemProps = {
   message: ConversationMessage;
@@ -41,9 +42,16 @@ export function MessageItem({ message }: MessageItemProps): JSX.Element {
           {message.isLoading && message.text.trim().length === 0 ? (
             <div className="h-4 w-4 animate-spin rounded-[3px] border-2 border-slate-300"></div>
           ) : (
-            <p className={`whitespace-pre-wrap text-[15px] leading-relaxed ${message.isError ? 'text-rose-600' : 'text-slate-800'}`}>
-              {message.text}
-            </p>
+            message.isError ? (
+              <p className={`whitespace-pre-wrap text-[15px] leading-relaxed ${message.isError ? 'text-rose-600' : 'text-slate-800'}`}>
+                {message.text}
+              </p>
+            ) : (
+              <div
+                className="prose prose-slate max-w-none prose-p:my-2 prose-ul:my-2 prose-li:my-0 text-[15px]"
+                dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(message.text) }}
+              />
+            )
           )}
           {message.actions && message.actions.length > 0 ? (
             <div className="mt-2 flex flex-wrap gap-2">
