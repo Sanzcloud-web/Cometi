@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { URL } from 'node:url';
 import { processChatRequest, type ChatPayload } from './chat-service';
+import { processResumeRequest, type ResumeRequestPayload } from './resume';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const ORIGIN = process.env.ORIGIN ?? '*';
@@ -46,30 +47,53 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  if (url.pathname !== '/api/chat') {
-    sendJson(res, 404, { error: 'Not Found' });
+  if (url.pathname === '/api/chat') {
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { error: 'Méthode non autorisée.' });
+      return;
+    }
+
+    try {
+      const rawBody = await readBody(req);
+      const payload = rawBody.length > 0 ? (JSON.parse(rawBody) as ChatPayload) : undefined;
+
+      const result = await processChatRequest(payload, {
+        apiKey: process.env.OPENAI_API_KEY,
+        model: process.env.OPENAI_MODEL,
+      });
+
+      sendJson(res, result.status, result.body);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erreur serveur inattendue.';
+      sendJson(res, 500, { error: message });
+    }
     return;
   }
 
-  if (req.method !== 'POST') {
-    sendJson(res, 405, { error: 'Méthode non autorisée.' });
+  if (url.pathname === '/api/resume') {
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { error: 'Méthode non autorisée.' });
+      return;
+    }
+
+    try {
+      const rawBody = await readBody(req);
+      const payload = rawBody.length > 0 ? (JSON.parse(rawBody) as ResumeRequestPayload) : undefined;
+
+      const summary = await processResumeRequest(payload, {
+        apiKey: process.env.OPENAI_API_KEY,
+        model: process.env.OPENAI_MODEL,
+      });
+
+      sendJson(res, 200, summary);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erreur serveur inattendue.';
+      sendJson(res, 500, { error: message });
+    }
     return;
   }
 
-  try {
-    const rawBody = await readBody(req);
-    const payload = rawBody.length > 0 ? (JSON.parse(rawBody) as ChatPayload) : undefined;
-
-    const result = await processChatRequest(payload, {
-      apiKey: process.env.OPENAI_API_KEY,
-      model: process.env.OPENAI_MODEL,
-    });
-
-    sendJson(res, result.status, result.body);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Erreur serveur inattendue.';
-    sendJson(res, 500, { error: message });
-  }
+  sendJson(res, 404, { error: 'Not Found' });
 });
 
 server.listen(PORT, () => {

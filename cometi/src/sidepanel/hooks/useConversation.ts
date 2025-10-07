@@ -1,6 +1,8 @@
 import { FormEvent, useRef, useState } from 'react';
 import { requestChatCompletion } from '../services/chatClient';
-import type { ChromeChatMessage, ConversationMessage } from '../types/chat';
+import { requestResumeSummary } from '../services/resumeCommand';
+import type { ChromeChatMessage, ConversationMessage, MessageAction } from '../types/chat';
+import type { ResumeSummary } from '../types/resume';
 
 const SYSTEM_PROMPT: ChromeChatMessage = {
   role: 'system',
@@ -26,14 +28,61 @@ export function useConversation() {
     return idCounterRef.current;
   };
 
-  const appendAssistantMessage = (text: string, options?: { isError?: boolean }) => {
+  const appendAssistantMessage = (
+    text: string,
+    options?: { isError?: boolean; actions?: MessageAction[] }
+  ): number => {
     const assistantMessage: ConversationMessage = {
       id: getNextId(),
       role: 'assistant',
       text,
       isError: options?.isError,
+      actions: options?.actions,
     };
     setMessages((prev) => [...prev, assistantMessage]);
+    return assistantMessage.id;
+  };
+
+  const updateAssistantMessage = (
+    id: number,
+    text: string,
+    options?: { isError?: boolean; actions?: MessageAction[] }
+  ) => {
+    setMessages((prev) =>
+      prev.map((message) =>
+        message.id === id
+          ? {
+              ...message,
+              text,
+              isError: options?.isError,
+              actions: options?.actions,
+            }
+          : message
+      )
+    );
+  };
+
+  const formatResumeSummary = (summary: ResumeSummary): { text: string; actions: MessageAction[] } => {
+    const header = summary.title ? `${summary.title}\n\n` : '';
+    const bullets = summary.tldr.map((item) => `• ${item}`).join('\n');
+    const sources = summary.usedSources.map((source, index) => `• Source ${index + 1} : ${source}`).join('\n');
+    const text =
+      `${header}TL;DR\n${bullets}\n\nRésumé\n${summary.summary}\n\nSources\n${sources}`.trim();
+
+    const actions: MessageAction[] = [
+      {
+        type: 'copy',
+        label: 'Copier le résumé',
+        value: text,
+      },
+      ...summary.usedSources.map<MessageAction>((source, index) => ({
+        type: 'open',
+        label: `Ouvrir source ${index + 1}`,
+        url: source,
+      })),
+    ];
+
+    return { text, actions };
   };
 
   const requestAssistantReply = async (history: ConversationMessage[]) => {
@@ -64,8 +113,31 @@ export function useConversation() {
     setDraft('');
     setIsLoading(true);
 
+    const isResumeCommand = content === '/resume';
+
     setMessages((prev) => {
       const nextHistory = [...prev, userMessage];
+      if (isResumeCommand) {
+        void (async () => {
+          const placeholderId = appendAssistantMessage('Analyse du contenu de la page en cours…');
+          try {
+            const summary = await requestResumeSummary();
+            const formatted = formatResumeSummary(summary);
+            updateAssistantMessage(placeholderId, formatted.text, { actions: formatted.actions });
+          } catch (error: unknown) {
+            const message =
+              error instanceof Error
+                ? error.message
+                : 'Impossible de produire le résumé de la page active.';
+            updateAssistantMessage(placeholderId, message, { isError: true });
+          } finally {
+            setIsLoading(false);
+          }
+        })();
+
+        return nextHistory;
+      }
+
       void requestAssistantReply(nextHistory)
         .then((assistantReply) => {
           appendAssistantMessage(assistantReply);
