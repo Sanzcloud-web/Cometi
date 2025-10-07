@@ -21,6 +21,7 @@ type BackgroundChatResponse = {
 
 const API_BASE = (import.meta.env.VITE_COMETI_API_BASE ?? '').replace(/\/+$/, '');
 const API_URL = import.meta.env.VITE_COMETI_API_URL || (API_BASE ? `${API_BASE}/chat` : undefined);
+const STREAM_URL = API_BASE ? `${API_BASE}/chat-stream` : undefined;
 
 function isChromeRuntimeAvailable(): boolean {
   return typeof chrome !== 'undefined' && typeof chrome.runtime?.sendMessage === 'function';
@@ -102,4 +103,64 @@ export async function requestChatCompletion(messages: ChromeChatMessage[]): Prom
   }
 
   return sendViaHttp(messages);
+}
+
+export async function requestChatCompletionStream(
+  messages: ChromeChatMessage[],
+  onDelta: (chunk: string) => void
+): Promise<string> {
+  // Prefer streaming over HTTP when base URL available
+  if (!STREAM_URL) {
+    // Fall back to non-stream HTTP
+    const full = await sendViaHttp(messages);
+    onDelta(full);
+    return full;
+  }
+
+  const response = await fetch(STREAM_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages }),
+  });
+
+  if (!response.ok || !response.body) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Stream HTTP ${response.status} ${text}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+  let acc = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop() ?? '';
+    for (const part of parts) {
+      const lines = part.trim().split('\n');
+      let event: string | undefined;
+      let data: string | undefined;
+      for (const line of lines) {
+        if (line.startsWith('event:')) event = line.replace(/^event:\s*/, '').trim();
+        if (line.startsWith('data:')) data = line.replace(/^data:\s*/, '').trim();
+      }
+      if (event === 'delta' && data) {
+        try {
+          const payload = JSON.parse(data) as { delta?: string };
+          if (payload.delta) {
+            acc += payload.delta;
+            onDelta(payload.delta);
+          }
+        } catch {
+          // ignore
+        }
+      } else if (event === 'done') {
+        return acc;
+      }
+    }
+  }
+
+  return acc;
 }

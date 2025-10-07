@@ -1,5 +1,5 @@
 import { FormEvent, useRef, useState } from 'react';
-import { requestChatCompletion } from '../services/chatClient';
+import { requestChatCompletion, requestChatCompletionStream } from '../services/chatClient';
 import { requestResumeSummary } from '../services/resumeCommand';
 import type { ChromeChatMessage, ConversationMessage, MessageAction } from '../types/chat';
 import type { ResumeSummary } from '../types/resume';
@@ -85,7 +85,7 @@ export function useConversation() {
     return { text, actions };
   };
 
-  const requestAssistantReply = async (history: ConversationMessage[]) => {
+  const requestAssistantReply = async (history: ConversationMessage[], onStream?: (delta: string) => void) => {
     const payloadMessages: ChromeChatMessage[] = [
       SYSTEM_PROMPT,
       ...history.map<ChromeChatMessage>((message) => ({
@@ -94,6 +94,9 @@ export function useConversation() {
       })),
     ];
 
+    if (onStream) {
+      return requestChatCompletionStream(payloadMessages, onStream);
+    }
     return requestChatCompletion(payloadMessages);
   };
 
@@ -144,26 +147,28 @@ export function useConversation() {
     }
 
     // Regular chat flow
-    setMessages((prev) => {
-      const nextHistory = [...prev, userMessage];
+    // Streaming chat flow
+    setMessages((prev) => [...prev, userMessage]);
+    const placeholderId = appendAssistantMessage('');
+    let acc = '';
 
-      void requestAssistantReply(nextHistory)
-        .then((assistantReply) => {
-          appendAssistantMessage(assistantReply);
-        })
-        .catch((error: unknown) => {
-          const message =
-            error instanceof Error
-              ? error.message
-              : "Une erreur inattendue est survenue lors de l'appel au backend Cometi.";
-          appendAssistantMessage(message, { isError: true });
-        })
-        .finally(() => {
-          setIsLoading(false);
-        });
-
-      return nextHistory;
-    });
+    void requestAssistantReply([...messages, userMessage], (delta) => {
+      acc += delta;
+      updateAssistantMessage(placeholderId, acc);
+    })
+      .then((finalText) => {
+        updateAssistantMessage(placeholderId, finalText);
+      })
+      .catch((error: unknown) => {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Une erreur inattendue est survenue lors de l'appel au backend Cometi.";
+        updateAssistantMessage(placeholderId, message, { isError: true });
+      })
+      .finally(() => {
+        setIsLoading(false);
+      });
   };
 
   return {
