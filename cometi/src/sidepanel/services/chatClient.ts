@@ -19,7 +19,8 @@ type BackgroundChatResponse = {
   error?: string;
 };
 
-const API_URL = import.meta.env.VITE_COMETI_API_URL;
+const API_BASE = (import.meta.env.VITE_COMETI_API_BASE ?? '').replace(/\/+$/, '');
+const API_URL = import.meta.env.VITE_COMETI_API_URL || (API_BASE ? `${API_BASE}/chat` : undefined);
 
 function isChromeRuntimeAvailable(): boolean {
   return typeof chrome !== 'undefined' && typeof chrome.runtime?.sendMessage === 'function';
@@ -34,7 +35,7 @@ async function sendViaChromeRuntime(messages: ChromeChatMessage[]): Promise<stri
 
     chrome.runtime.sendMessage(request, (response?: BackgroundChatResponse) => {
       if (chrome.runtime.lastError) {
-        reject(new ChromeRuntimeTransportError(chrome.runtime.lastError.message));
+        reject(new ChromeRuntimeTransportError(chrome.runtime.lastError.message ?? 'Runtime error'));
         return;
       }
 
@@ -60,7 +61,9 @@ async function sendViaChromeRuntime(messages: ChromeChatMessage[]): Promise<stri
 
 async function sendViaHttp(messages: ChromeChatMessage[]): Promise<string> {
   if (!API_URL) {
-    throw new Error("URL API absente. Ajoute VITE_COMETI_API_URL dans ton fichier .env.");
+    throw new Error(
+      "URL API absente. Ajoute VITE_COMETI_API_BASE (ex: http://localhost:3000/api) ou VITE_COMETI_API_URL dans ton fichier .env."
+    );
   }
 
   const response = await fetch(API_URL, {

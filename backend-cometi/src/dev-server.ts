@@ -77,17 +77,28 @@ const server = createServer(async (req, res) => {
     }
 
     try {
+      const startedAt = Date.now();
       const rawBody = await readBody(req);
       const payload = rawBody.length > 0 ? (JSON.parse(rawBody) as ResumeRequestPayload) : undefined;
+      const logId = Math.random().toString(36).slice(2, 8);
+      const urlForLog = payload?.url ?? '<absent>';
+      const hasDom = Boolean(payload?.domSnapshot?.html);
+      const titleLen = (payload?.title ?? '').length;
+      console.log(`[resume ${logId}] POST /api/resume url=${urlForLog} titleLen=${titleLen} dom=${hasDom} rawBytes=${rawBody.length}`);
 
       const summary = await processResumeRequest(payload, {
         apiKey: process.env.OPENAI_API_KEY,
         model: process.env.OPENAI_MODEL,
       });
 
+      const duration = Date.now() - startedAt;
+      console.log(
+        `[resume ${logId}] OK url=${summary.url} tldr=${summary.tldr.length} titleLen=${summary.title.length} in ${duration}ms`
+      );
       sendJson(res, 200, summary);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Erreur serveur inattendue.';
+      console.error('[resume] ERROR', message);
       sendJson(res, 500, { error: message });
     }
     return;

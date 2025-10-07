@@ -13,7 +13,7 @@ export type DomCaptureFailure = {
 
 export async function captureRenderedDom(tabId: number): Promise<DomCaptureResult | DomCaptureFailure> {
   try {
-    const [result] = await chrome.scripting.executeScript<{ html: string; title: string } | undefined>({
+    const [result] = await chrome.scripting.executeScript({
       target: { tabId },
       func: () => {
         try {
@@ -28,12 +28,16 @@ export async function captureRenderedDom(tabId: number): Promise<DomCaptureResul
       },
     });
 
-    if (!result?.result || typeof result.result.html !== 'string') {
+    const payload = (result?.result ?? undefined) as
+      | { html: string; title: string }
+      | undefined;
+
+    if (!payload || typeof payload.html !== 'string') {
       return { success: false, error: 'Extraction DOM impossible.' };
     }
 
     logger.debug('DOM captured from active tab', { tabId });
-    return { success: true, html: result.result.html, title: result.result.title ?? '' };
+    return { success: true, html: payload.html, title: payload.title ?? '' };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erreur inconnue lors de la capture DOM.';
     logger.warn('captureRenderedDom failed', { tabId, message });

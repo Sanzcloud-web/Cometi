@@ -1,5 +1,5 @@
-// @ts-expect-error - pdfjs-dist typings are not fully aligned with ESM usage in Node.
-import * as pdfjsLib from 'pdfjs-dist/build/pdf.js';
+// @ts-expect-error - pdfjs-dist ships as CommonJS; default export lacks typings.
+import pdfjsLib from 'pdfjs-dist/build/pdf.js';
 import { deduplicateParagraphs, normalizeWhitespace } from '../utils/text';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = undefined;

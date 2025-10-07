@@ -8,6 +8,11 @@ API serverless pour relayer les requêtes vers OpenAI. Conçu pour être déploy
    - `OPENAI_API_KEY` : ta clé OpenAI.
    - `OPENAI_MODEL` : identifiant de modèle (ex. `gpt-4o-mini`).
    - `ORIGIN` : domaine autorisé pour le CORS (ex. `chrome-extension://...`). Laisse `*` pour du debug.
+   - (Optionnel) Embeddings pour le résumé: 
+     - `DB_EMBEDDING` : URL PostgreSQL (Neon) ex: `postgresql://user:pass@host/db?sslmode=require`
+     - `EMBEDDING_MODEL` : par défaut `text-embedding-3-small`
+     - `RESUME_TOP_K` : nombre de chunks gardés (défaut `8`)
+     - `RESUME_QUERY` : requête d’ancrage (défaut `RESUME`)
 
 2. Installe les dépendances :
 
@@ -23,6 +28,24 @@ API serverless pour relayer les requêtes vers OpenAI. Conçu pour être déploy
 
    L’API sera accessible sur `http://localhost:3000/api/chat` et `http://localhost:3000/api/resume`.
    > Ce serveur de développement est un petit serveur Node.js (pas besoin du CLI Vercel).
+
+### Activer la DB d’embeddings (PostgreSQL)
+
+1. Renseigne `DB_EMBEDDING` dans `.env` avec l’URL Neon (pense à `sslmode=require`).
+2. Installe Prisma et génère le client:
+
+   ```bash
+   npm install
+   npm run prisma:generate
+   ```
+
+3. Crée le schéma et applique la première migration:
+
+   ```bash
+   npm run prisma:migrate
+   ```
+
+4. Relance `npm run dev` puis refais un `/api/resume`.
 
 4. Pour simuler exactement l’environnement Vercel (optionnel) :
 

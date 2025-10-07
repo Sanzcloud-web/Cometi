@@ -13,11 +13,15 @@ type ResumeCommandPayload = {
   };
 };
 
-const RESUME_API_URL = import.meta.env.VITE_COMETI_RESUME_URL;
+const API_BASE = (import.meta.env.VITE_COMETI_API_BASE ?? '').replace(/\/+$/, '');
+const RESUME_API_URL =
+  import.meta.env.VITE_COMETI_RESUME_URL || (API_BASE ? `${API_BASE}/resume` : undefined);
 
 function ensureResumeApiUrl(): string {
   if (!RESUME_API_URL) {
-    throw new Error('URL API /resume absente. Ajoute VITE_COMETI_RESUME_URL dans ton fichier .env.');
+    throw new Error(
+      "URL API /resume absente. Ajoute VITE_COMETI_API_BASE (ex: http://localhost:3000/api) ou VITE_COMETI_RESUME_URL dans ton fichier .env."
+    );
   }
   return RESUME_API_URL;
 }

@@ -60,6 +60,9 @@ export async function processChatRequest(
     };
   }
 
+  const totalLen = payload.messages.reduce((n, m) => n + (m.content?.length ?? 0), 0);
+  console.log(`[chat] model=${model} messages=${payload.messages.length} totalLen=${totalLen}`);
+
   const response = await fetch(OPENAI_ENDPOINT, {
     method: 'POST',
     headers: {

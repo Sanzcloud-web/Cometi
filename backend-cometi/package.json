@@ -5,13 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/dev-server.ts",
-    "vercel:dev": "vercel dev"
+    "vercel:dev": "vercel dev",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev --name init_embeddings"
   },
   "dependencies": {
     "@vercel/node": "^3.2.12",
     "jsdom": "^22.1.0",
     "pdfjs-dist": "^3.11.174",
-    "tinyld": "^1.3.2"
+    "tinyld": "^1.3.2",
+    "@prisma/client": "^5.22.0"
   },
   "devDependencies": {
     "@types/jsdom": "^21.1.6",
@@ -19,6 +22,7 @@
     "typescript": "^5.4.5",
     "dotenv": "^16.4.5",
     "tsx": "^4.7.0",
-    "vercel": "^48.2.2"
+    "vercel": "^48.2.2",
+    "prisma": "^5.22.0"
   }
 }

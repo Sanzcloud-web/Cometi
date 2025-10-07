@@ -31,7 +31,7 @@ export async function requestResumeSummary(): Promise<ResumeSummary> {
 
     chrome.runtime.sendMessage(request, (response?: ResumeCommandResponse) => {
       if (chrome.runtime.lastError) {
-        reject(new ResumeCommandError(chrome.runtime.lastError.message));
+        reject(new ResumeCommandError(chrome.runtime.lastError.message ?? 'Runtime error'));
         return;
       }
 

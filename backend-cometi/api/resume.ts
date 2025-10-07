@@ -23,18 +23,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
+    const startedAt = Date.now();
     const payload = (typeof req.body === 'string' ? JSON.parse(req.body) : req.body) as
       | ResumeRequestPayload
       | undefined;
+    const logId = Math.random().toString(36).slice(2, 8);
+    const urlForLog = payload?.url ?? '<absent>';
+    const hasDom = Boolean(payload?.domSnapshot?.html);
+    const titleLen = (payload?.title ?? '').length;
+    console.log(`[resume ${logId}] API /api/resume url=${urlForLog} titleLen=${titleLen} dom=${hasDom}`);
 
     const summary = await processResumeRequest(payload, {
       apiKey: process.env.OPENAI_API_KEY,
       model: process.env.OPENAI_MODEL,
     });
 
+    const duration = Date.now() - startedAt;
+    console.log(`[resume ${logId}] OK url=${summary.url} tldr=${summary.tldr.length} titleLen=${summary.title.length} in ${duration}ms`);
     res.status(200).json(summary);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erreur serveur inattendue.';
+    console.error('[resume] ERROR', message);
     res.status(500).json({ error: message });
   }
 }

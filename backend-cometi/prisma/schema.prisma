@@ -1,0 +1,35 @@
+// Prisma schema for storing document chunks and embeddings
+// Provider: PostgreSQL (set DB_EMBEDDING to a postgres URL)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource embeddings {
+  provider = "postgresql"
+  url      = env("DB_EMBEDDING")
+}
+
+model Document {
+  id        String   @id @default(cuid())
+  url       String   @unique
+  title     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  chunks    Chunk[]
+}
+
+model Chunk {
+  id          String   @id @default(cuid())
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentId  String
+  index       Int
+  content     String
+  // Embedding stored as Float32 bytes (BLOB in sqlite)
+  embedding   Bytes
+  dim         Int
+  createdAt   DateTime @default(now())
+
+  @@unique([documentId, index])
+  @@index([documentId])
+}

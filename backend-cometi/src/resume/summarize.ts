@@ -70,16 +70,22 @@ export async function generateSummary(
 
   if (combined.length > MAX_DIRECT_INPUT_LENGTH) {
     const chunks = chunkText(paragraphs, 4000);
+    console.log(`[resume] chunking: combinedLen=${combined.length} chunks=${chunks.length}`);
     const miniSummaries: string[] = [];
-    for (const chunk of chunks) {
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      console.log(`[resume] summarizing chunk ${i + 1}/${chunks.length} len=${chunk.length}`);
       const chunkSummary = await summarizeChunk(chunk, language, env);
+      console.log(`[resume] chunk ${i + 1}/${chunks.length} summarized len=${chunkSummary.length}`);
       miniSummaries.push(chunkSummary);
     }
     synthesisSource = miniSummaries.join('\n\n');
   }
 
   const messages = buildFinalSummaryPrompt(synthesisSource, language, url);
+  console.log(`[resume] requesting final summary sourceLen=${synthesisSource.length}`);
   const rawSummary = await requestCompletion(messages, env);
+  console.log(`[resume] final summary received len=${rawSummary.length}`);
   const parsed = sanitizeJsonPayload(rawSummary) as Partial<FinalSummaryPayload>;
 
   if (!parsed || !Array.isArray(parsed.tldr) || typeof parsed.summary !== 'string') {
