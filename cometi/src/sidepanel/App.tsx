@@ -22,13 +22,15 @@ export function App(): JSX.Element {
   const latestPrompt = useMemo(() => getLatestUserPrompt(messages), [messages]);
 
   return (
-    <div className="flex min-h-screen flex-col bg-slate-100 text-slate-900">
+    <div className="flex h-screen flex-col bg-slate-100 text-slate-900">
       <AppHeader />
 
-      <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-6">
-        <div className="mx-auto flex w-full max-w-3xl flex-col">
+      <main className="flex-1 overflow-hidden px-4 py-6 sm:px-6">
+        <div className="mx-auto flex h-full w-full max-w-3xl flex-col gap-6">
           <ResponseTabs />
-          <ConversationThread messages={messages} isLoading={isLoading} />
+          <div className="relative flex-1 overflow-y-auto pr-1">
+            <ConversationThread messages={messages} isLoading={isLoading} />
+          </div>
         </div>
       </main>
 
