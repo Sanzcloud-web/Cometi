@@ -31,7 +31,7 @@ export function Composer({ draft, onDraftChange, onSubmit, isSubmitting }: Compo
   return (
     <form
       onSubmit={onSubmit}
-      className="group relative flex min-h-[4.5rem] items-end gap-3 rounded-xl border border-slate-200 bg-white p-3"
+      className="flex items-end gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm"
     >
       <Textarea
         ref={textareaRef}
@@ -41,8 +41,9 @@ export function Composer({ draft, onDraftChange, onSubmit, isSubmitting }: Compo
           adjustTextareaSize(event.currentTarget);
         }}
         rows={1}
-        placeholder="Entrez votre message"
-        className="max-h-64 flex-1 resize-none px-0 py-0 text-[0.95rem] leading-relaxed text-slate-800 placeholder:text-slate-400 "
+        placeholder="Écrire un message…"
+        variant="plain"
+        className="max-h-64 flex-1 leading-relaxed"
         disabled={isSubmitting}
         onKeyDown={(event) => {
           if (event.key === 'Enter' && !event.shiftKey) {
@@ -58,7 +59,7 @@ export function Composer({ draft, onDraftChange, onSubmit, isSubmitting }: Compo
         type="submit"
         aria-label="Envoyer le message"
         disabled={isSubmitting || draft.trim().length === 0}
-        className="h-10 w-10 rounded-full text-white hover:bg-slate-800"
+        className="h-10 w-10 rounded-full bg-slate-900 text-white hover:bg-slate-800"
       >
         <PaperAirplaneIcon className="h-4 w-4" />
       </Button>

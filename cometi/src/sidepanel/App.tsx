@@ -8,9 +8,9 @@ export function App(): JSX.Element {
   const { messages, draft, setDraft, isLoading, handleSubmit } = useConversation();
 
   return (
-    <div className="flex h-screen w-full justify-center bg-slate-50 px-4 py-6 text-slate-900 sm:px-6">
+    <div className="flex h-screen w-full justify-center px-2 py-2 sm:px-6">
       <div className="flex h-full w-full max-w-2xl flex-col gap-4">
-        <div className="flex-1 overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div className="flex-1 overflow-hidden rounded-xl bg-transparent">
           <ScrollArea className="h-full">
             <ConversationThread messages={messages} isLoading={isLoading} />
           </ScrollArea>
