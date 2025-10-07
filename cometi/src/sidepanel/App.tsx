@@ -5,8 +5,14 @@ import { ScrollArea } from './components/ui/scroll-area';
 import { useSuggestions } from './hooks/useSuggestions';
 
 export function App(): JSX.Element {
-  const { messages, draft, setDraft, isLoading, handleSubmit } = useConversation();
-  const { suggestions, isLoading: areSuggestionsLoading, error: suggestionsError, refresh } = useSuggestions();
+  const { messages, draft, setDraft, isLoading, handleSubmit, runPrompt } = useConversation();
+  const {
+    suggestions,
+    isLoading: areSuggestionsLoading,
+    isRefreshing: areSuggestionsRefreshing,
+    error: suggestionsError,
+    refresh,
+  } = useSuggestions();
 
   return (
     <div className="flex h-screen w-full justify-center px-2 py-2 sm:px-6">
@@ -23,8 +29,12 @@ export function App(): JSX.Element {
           isSubmitting={isLoading}
           suggestions={suggestions}
           areSuggestionsLoading={areSuggestionsLoading}
+          areSuggestionsRefreshing={areSuggestionsRefreshing}
           suggestionsError={suggestionsError}
           onRefreshSuggestions={refresh}
+          onSuggestionSelected={(suggestion) => {
+            runPrompt(suggestion.label, { enforcePageContext: true });
+          }}
         />
       </div>
     </div>

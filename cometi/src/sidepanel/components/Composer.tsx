@@ -15,8 +15,10 @@ type ComposerProps = {
   isSubmitting: boolean;
   suggestions: Suggestion[];
   areSuggestionsLoading: boolean;
+  areSuggestionsRefreshing?: boolean;
   suggestionsError?: string;
   onRefreshSuggestions?: () => void;
+  onSuggestionSelected?: (suggestion: Suggestion) => void;
 };
 
 export function Composer({
@@ -26,8 +28,10 @@ export function Composer({
   isSubmitting,
   suggestions,
   areSuggestionsLoading,
+  areSuggestionsRefreshing,
   suggestionsError,
   onRefreshSuggestions,
+  onSuggestionSelected,
 }: ComposerProps): JSX.Element {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isSlashOpen, setIsSlashOpen] = useState(false);
@@ -97,9 +101,14 @@ export function Composer({
         <SuggestionsTray
           suggestions={suggestions}
           isLoading={areSuggestionsLoading}
+          isRefreshing={areSuggestionsRefreshing}
           error={suggestionsError}
           onRetry={onRefreshSuggestions}
           onSelect={(suggestion) => {
+            if (onSuggestionSelected) {
+              onSuggestionSelected(suggestion);
+              return;
+            }
             onDraftChange(suggestion.label);
             requestAnimationFrame(() => {
               if (textareaRef.current) {

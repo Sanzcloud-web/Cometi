@@ -1,75 +1,85 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { requestSuggestions } from '../services/suggestionsClient';
-import { requestResumeContext } from '../services/pageAnswerStream';
 import type { Suggestion } from '../types/suggestions';
+import { useActivePageContext } from './useActivePageContext';
 
 type SuggestionsState = {
   suggestions: Suggestion[];
   isLoading: boolean;
+  isRefreshing: boolean;
   error?: string;
 };
 
 const INITIAL_STATE: SuggestionsState = {
   suggestions: [],
   isLoading: true,
+  isRefreshing: false,
 };
-
-function getDomainFromUrl(url?: string): string | undefined {
-  if (!url) return undefined;
-  try {
-    const parsed = new URL(url);
-    return parsed.hostname;
-  } catch (_error) {
-    return undefined;
-  }
-}
-
-function getFallbackDomain(): string | undefined {
-  if (typeof window === 'undefined') return undefined;
-  try {
-    return window.location.hostname || undefined;
-  } catch (_error) {
-    return undefined;
-  }
-}
 
 export function useSuggestions() {
   const [state, setState] = useState<SuggestionsState>(INITIAL_STATE);
   const [reloadToken, setReloadToken] = useState(0);
+  const cacheRef = useRef(new Map<string, Suggestion[]>());
+  const requestCounterRef = useRef(0);
+  const { domain, title, url } = useActivePageContext();
+
+  const resolvedDomain = useMemo(() => {
+    if (domain && domain.trim().length > 0) {
+      return domain.trim().toLowerCase();
+    }
+    if (typeof window !== 'undefined') {
+      try {
+        return window.location.hostname || undefined;
+      } catch (_error) {
+        return undefined;
+      }
+    }
+    return undefined;
+  }, [domain]);
 
   const refresh = useCallback(() => {
     setReloadToken((token) => token + 1);
   }, []);
 
   useEffect(() => {
+    const targetDomain = resolvedDomain;
+
+    if (!targetDomain) {
+      setState({ suggestions: [], isLoading: false, isRefreshing: false, error: undefined });
+      return;
+    }
+
+    const cachedSuggestions = cacheRef.current.get(targetDomain) ?? [];
+    const hasCachedSuggestions = cachedSuggestions.length > 0;
     let cancelled = false;
+    const requestId = ++requestCounterRef.current;
 
     async function load() {
-      setState((prev) => ({ ...prev, isLoading: true, error: undefined }));
+      setState({
+        suggestions: hasCachedSuggestions ? cachedSuggestions : [],
+        isLoading: !hasCachedSuggestions,
+        isRefreshing: hasCachedSuggestions,
+        error: undefined,
+      });
 
       try {
-        let domain: string | undefined;
-        let context: string | undefined;
+        const contextLabel = (title && title.trim()) || url || undefined;
+        const suggestions = await requestSuggestions({ domain: targetDomain, context: contextLabel, language: 'fr' });
 
-        try {
-          const resumeContext = await requestResumeContext();
-          domain = getDomainFromUrl(resumeContext.url);
-          context = resumeContext.title ?? resumeContext.domSnapshot?.title ?? undefined;
-        } catch (error) {
-          console.warn('[Cometi] Impossible de récupérer le contexte page pour les suggestions:', error);
-          domain = getFallbackDomain();
-        }
-
-        const suggestions = await requestSuggestions({ domain, context, language: 'fr' });
-
-        if (!cancelled) {
-          setState({ suggestions, isLoading: false, error: undefined });
+        if (!cancelled && requestCounterRef.current === requestId) {
+          cacheRef.current.set(targetDomain, suggestions);
+          setState({ suggestions, isLoading: false, isRefreshing: false, error: undefined });
         }
       } catch (error) {
-        if (!cancelled) {
+        if (!cancelled && requestCounterRef.current === requestId) {
           const message =
-            error instanceof Error ? error.message : "Impossible de récupérer les suggestions disponibles.";
-          setState({ suggestions: [], isLoading: false, error: message });
+            error instanceof Error ? error.message : 'Impossible de récupérer les suggestions disponibles.';
+          setState((prev) => ({
+            suggestions: hasCachedSuggestions ? cachedSuggestions : prev.suggestions,
+            isLoading: !hasCachedSuggestions,
+            isRefreshing: false,
+            error: message,
+          }));
         }
       }
     }
@@ -79,15 +89,17 @@ export function useSuggestions() {
     return () => {
       cancelled = true;
     };
-  }, [reloadToken]);
+  }, [resolvedDomain, title, url, reloadToken]);
 
   return useMemo(
     () => ({
       suggestions: state.suggestions,
       isLoading: state.isLoading,
+      isRefreshing: state.isRefreshing,
       error: state.error,
       refresh,
     }),
-    [state.suggestions, state.isLoading, state.error, refresh]
+    [state.suggestions, state.isLoading, state.isRefreshing, state.error, refresh]
   );
 }
+
