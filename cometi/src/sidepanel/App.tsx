@@ -8,8 +8,8 @@ export function App(): JSX.Element {
   const { messages, draft, setDraft, isLoading, handleSubmit } = useConversation();
 
   return (
-    <div className="flex h-screen w-full justify-center bg-slate-50 px-4 py-6 text-slate-900 sm:px-6">
-      <div className="flex h-full w-full max-w-2xl flex-col gap-4">
+    <div className="flex h-screen w-full justify-center">
+      <div className="flex h-full w-full max-w-2xl flex-col">
         <Card className="flex-1 overflow-hidden border-slate-200 bg-white">
           <ScrollArea className="h-full">
             <ConversationThread messages={messages} isLoading={isLoading} />

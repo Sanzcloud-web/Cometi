@@ -111,3 +111,50 @@ export async function requestResumeSummaryStream(
   return final;
 }
 
+// Extract a human-readable preview of the `summary` string being streamed as JSON.
+// It scans the accumulated raw stream (JSON text, possibly incomplete) and returns
+// the current best-effort decoded content of the `summary` field.
+export function extractSummaryPreview(raw: string): string | null {
+  if (!raw || raw.length === 0) return null;
+  // Strip code fences if any
+  let s = raw.replace(/```json|```/g, '');
+  const keyIndex = s.indexOf('"summary"');
+  if (keyIndex === -1) return null;
+  // Find the first quote after the colon
+  let i = keyIndex + 9; // after "summary"
+  while (i < s.length && s[i] !== ':') i++;
+  if (i >= s.length) return null;
+  i++; // skip ':'
+  // Skip whitespace
+  while (i < s.length && /\s/.test(s[i])) i++;
+  if (i >= s.length || s[i] !== '"') return null;
+  i++; // now inside summary string
+
+  let out = '';
+  let escaped = false;
+  for (; i < s.length; i++) {
+    const ch = s[i];
+    if (escaped) {
+      // Basic JSON escapes
+      if (ch === 'n') out += '\n';
+      else if (ch === 'r') out += '\r';
+      else if (ch === 't') out += '\t';
+      else if (ch === '"') out += '"';
+      else if (ch === '\\') out += '\\';
+      else out += ch; // fallback
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      // Closing quote reached; we have a complete summary string
+      break;
+    }
+    out += ch;
+  }
+  return out.length > 0 ? out : null;
+}
+

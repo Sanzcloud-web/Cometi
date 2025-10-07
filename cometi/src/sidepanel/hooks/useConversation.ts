@@ -1,7 +1,7 @@
 import { FormEvent, useRef, useState } from 'react';
 import { requestChatCompletion, requestChatCompletionStream } from '../services/chatClient';
 import { requestResumeSummary } from '../services/resumeCommand';
-import { requestResumeSummaryStream } from '../services/resumeStream';
+import { requestResumeSummaryStream, extractSummaryPreview } from '../services/resumeStream';
 import type { ChromeChatMessage, ConversationMessage, MessageAction } from '../types/chat';
 import type { ResumeSummary } from '../types/resume';
 
@@ -141,7 +141,10 @@ export function useConversation() {
             },
             onDelta: (delta) => {
               acc += delta;
-              updateAssistantMessage(placeholderId, acc);
+              const preview = extractSummaryPreview(acc);
+              if (preview && preview.trim().length > 0) {
+                updateAssistantMessage(placeholderId, preview);
+              }
             },
           });
           const formatted = formatResumeSummary(summary);
