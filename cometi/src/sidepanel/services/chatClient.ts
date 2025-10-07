@@ -1,4 +1,4 @@
-import type { ChromeChatMessage } from './types';
+import type { ChromeChatMessage } from '../types/chat';
 
 class ChromeRuntimeTransportError extends Error {
   constructor(message: string) {
@@ -34,8 +34,7 @@ async function sendViaChromeRuntime(messages: ChromeChatMessage[]): Promise<stri
 
     chrome.runtime.sendMessage(request, (response?: BackgroundChatResponse) => {
       if (chrome.runtime.lastError) {
-        // Correction du typage : chrome.runtime.lastError.message peut être undefined, donc fournir une valeur par défaut
-        reject(new ChromeRuntimeTransportError(chrome.runtime.lastError.message ?? 'Erreur inconnue de Chrome Runtime'));
+        reject(new ChromeRuntimeTransportError(chrome.runtime.lastError.message));
         return;
       }
 
