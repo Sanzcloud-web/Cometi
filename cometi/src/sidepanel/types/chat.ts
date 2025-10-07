@@ -23,4 +23,5 @@ export type ConversationMessage = {
   text: string;
   isError?: boolean;
   actions?: MessageAction[];
+  isLoading?: boolean;
 };

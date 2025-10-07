@@ -31,7 +31,7 @@ export function useConversation() {
 
   const appendAssistantMessage = (
     text: string,
-    options?: { isError?: boolean; actions?: MessageAction[] }
+    options?: { isError?: boolean; actions?: MessageAction[]; isLoading?: boolean }
   ): number => {
     const assistantMessage: ConversationMessage = {
       id: getNextId(),
@@ -39,6 +39,7 @@ export function useConversation() {
       text,
       isError: options?.isError,
       actions: options?.actions,
+      isLoading: options?.isLoading,
     };
     setMessages((prev) => [...prev, assistantMessage]);
     return assistantMessage.id;
@@ -47,7 +48,7 @@ export function useConversation() {
   const updateAssistantMessage = (
     id: number,
     text: string,
-    options?: { isError?: boolean; actions?: MessageAction[] }
+    options?: { isError?: boolean; actions?: MessageAction[]; isLoading?: boolean }
   ) => {
     setMessages((prev) =>
       prev.map((message) =>
@@ -57,6 +58,7 @@ export function useConversation() {
               text,
               isError: options?.isError,
               actions: options?.actions,
+              isLoading: options?.isLoading ?? message.isLoading,
             }
           : message
       )
@@ -125,12 +127,13 @@ export function useConversation() {
       setMessages((prev) => [
         ...prev,
         userMessage,
-        { id: placeholderId, role: 'assistant', text: 'Analyse du contenu de la page en cours…' },
+        { id: placeholderId, role: 'assistant', text: '', isLoading: true },
       ]);
 
       void (async () => {
         try {
           let acc = '';
+          let first = true;
           const summary = await requestResumeSummaryStream({
             onProgress: (e) => {
               // Optionally reflect stage in UI in the future
@@ -143,7 +146,12 @@ export function useConversation() {
               acc += delta;
               const preview = extractSummaryPreview(acc);
               if (preview && preview.trim().length > 0) {
-                updateAssistantMessage(placeholderId, preview);
+                if (first) {
+                  first = false;
+                  updateAssistantMessage(placeholderId, preview, { isLoading: false });
+                } else {
+                  updateAssistantMessage(placeholderId, preview);
+                }
               }
             },
           });
@@ -166,12 +174,18 @@ export function useConversation() {
     // Regular chat flow
     // Streaming chat flow
     setMessages((prev) => [...prev, userMessage]);
-    const placeholderId = appendAssistantMessage('');
+    const placeholderId = appendAssistantMessage('', { isLoading: true });
     let acc = '';
+    let first = true;
 
     void requestAssistantReply([...messages, userMessage], (delta) => {
       acc += delta;
-      updateAssistantMessage(placeholderId, acc);
+      if (first) {
+        first = false;
+        updateAssistantMessage(placeholderId, acc, { isLoading: false });
+      } else {
+        updateAssistantMessage(placeholderId, acc);
+      }
     })
       .then((finalText) => {
         updateAssistantMessage(placeholderId, finalText);

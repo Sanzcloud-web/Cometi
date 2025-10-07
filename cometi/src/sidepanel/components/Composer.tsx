@@ -31,7 +31,7 @@ export function Composer({ draft, onDraftChange, onSubmit, isSubmitting }: Compo
   return (
     <form
       onSubmit={onSubmit}
-      className="group relative flex min-h-[4.5rem] items-end gap-3 rounded-2xl border border-[#D6E4FF] bg-[#F1F6FF] p-4 shadow-sm transition focus-within:border-[#A8C7FF] focus-within:ring-2 focus-within:ring-[#D7E5FF]"
+      className="group relative flex min-h-[4.5rem] items-end gap-3 rounded-xl border border-slate-200 bg-white p-3"
     >
       <Textarea
         ref={textareaRef}
@@ -42,22 +42,23 @@ export function Composer({ draft, onDraftChange, onSubmit, isSubmitting }: Compo
         }}
         rows={1}
         placeholder="Entrez votre message"
-        className="max-h-64 flex-1 resize-none border-none bg-transparent px-0 py-0 text-[0.95rem] leading-relaxed text-slate-800 placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-0 shadow-none"
+        className="max-h-64 flex-1 resize-none px-0 py-0 text-[0.95rem] leading-relaxed text-slate-800 placeholder:text-slate-400 "
         disabled={isSubmitting}
         onKeyDown={(event) => {
-          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+          if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault();
-            event.currentTarget.form?.requestSubmit();
+            if (!isSubmitting && event.currentTarget.value.trim().length > 0) {
+              event.currentTarget.form?.requestSubmit();
+            }
           }
         }}
         style={{ overflowY: 'hidden' }}
       />
       <Button
         type="submit"
-        variant="ghost"
         aria-label="Envoyer le message"
         disabled={isSubmitting || draft.trim().length === 0}
-        className="h-11 w-11 rounded-xl bg-[#5B8CFF] text-white shadow transition hover:bg-[#4A7FF1] focus-visible:ring-[#5B8CFF] focus-visible:ring-offset-0"
+        className="h-10 w-10 rounded-full text-white hover:bg-slate-800"
       >
         <PaperAirplaneIcon className="h-4 w-4" />
       </Button>

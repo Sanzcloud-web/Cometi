@@ -1,6 +1,5 @@
 import type { ConversationMessage } from '../types/chat';
 import { MessageItem } from './MessageItem';
-import { TypingIndicator } from './TypingIndicator';
 import { useEffect, useRef } from 'react';
 
 type ConversationThreadProps = {
@@ -19,7 +18,6 @@ export function ConversationThread({ messages, isLoading }: ConversationThreadPr
       {messages.map((message) => (
         <MessageItem key={message.id} message={message} />
       ))}
-      {isLoading ? <TypingIndicator /> : null}
       <div ref={endRef} />
     </div>
   );

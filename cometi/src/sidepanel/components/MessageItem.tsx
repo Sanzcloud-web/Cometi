@@ -30,36 +30,46 @@ export function MessageItem({ message }: MessageItemProps): JSX.Element {
   const isAssistant = message.role === 'assistant';
 
   if (isAssistant) {
+    // Assistant style: no bubble, simple left-aligned text like OpenAI/Claude
     return (
-      <Card className="space-y-2 border-slate-200 bg-white/95">
-        <p className="text-[11px] font-medium uppercase tracking-[0.3em] text-slate-400">Cometi</p>
-        <p className={`whitespace-pre-line text-sm leading-relaxed ${message.isError ? 'text-rose-600' : 'text-slate-700'}`}>
-          {message.text}
-        </p>
-        {message.actions && message.actions.length > 0 ? (
-          <div className="flex flex-wrap gap-2 pt-1">
-            {message.actions.map((action, index) => (
-              <button
-                key={`${action.label}-${index}`}
-                type="button"
-                onClick={() => handleAction(action)}
-                className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-100"
-              >
-                {action.label}
-              </button>
-            ))}
-          </div>
-        ) : null}
-      </Card>
+      <div className="flex items-start gap-3 px-4 py-5">
+        <div className="flex h-7 w-7 shrink-0 select-none items-center justify-center rounded-full bg-slate-100 text-[10px] font-medium text-slate-500">
+          C
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="sr-only">Cometi</p>
+          {message.isLoading && message.text.trim().length === 0 ? (
+            <div className="h-4 w-4 animate-spin rounded-[3px] border-2 border-slate-300"></div>
+          ) : (
+            <p className={`whitespace-pre-wrap text-[15px] leading-relaxed ${message.isError ? 'text-rose-600' : 'text-slate-800'}`}>
+              {message.text}
+            </p>
+          )}
+          {message.actions && message.actions.length > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {message.actions.map((action, index) => (
+                <button
+                  key={`${action.label}-${index}`}
+                  type="button"
+                  onClick={() => handleAction(action)}
+                  className="inline-flex items-center rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                >
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </div>
     );
   }
 
+  // User style: right-aligned subtle bubble
   return (
-    <div className="flex justify-end">
-      <Card className="max-w-xl space-y-2 border-slate-200 bg-white text-slate-900">
-        <p className="text-[11px] font-medium uppercase tracking-[0.3em] text-slate-500">Toi</p>
-        <p className="whitespace-pre-line text-sm leading-relaxed text-slate-800">{message.text}</p>
-      </Card>
+    <div className="flex justify-end px-4 py-4">
+      <div className="max-w-[80%] rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
+        <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-900">{message.text}</p>
+      </div>
     </div>
   );
 }
