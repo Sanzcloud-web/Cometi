@@ -249,6 +249,7 @@ const server = createServer(async (req, res) => {
       let derivedTitle = payload.title ?? '';
 
       console.log(`[resume-stream ${logId}] fetch start url=${normalized}`);
+      sendTextEvent('progress', 'Analyse de la page');
       const remote = await fetchPageContent(normalized, 12000);
 
       let contentType: 'text/html' | 'application/pdf' | 'unknown' = 'unknown';
@@ -291,6 +292,7 @@ const server = createServer(async (req, res) => {
       }
 
       console.log(`[resume-stream ${logId}] extract start contentType=${contentType}`);
+      sendTextEvent('progress', 'Extraction du contenu principal');
       const extraction = await extractMainText({ contentType, raw });
       let paragraphs = extraction.paragraphs;
       const title = extraction.title?.trim() || derivedTitle || normalized;
@@ -316,6 +318,7 @@ const server = createServer(async (req, res) => {
       // Simplified RAG: select top 6 chunks
       let topChunks: string[] = [];
       if (process.env.DB_EMBEDDING) {
+        sendTextEvent('progress', 'Repérage des passages clés');
         console.log(`[resume-stream ${logId}] retrieval start paragraphs=${paragraphs.length}`);
         const selected = await indexAndSelectTopChunks(normalized, title, paragraphs, {
           apiKey: process.env.OPENAI_API_KEY,
@@ -339,6 +342,7 @@ const server = createServer(async (req, res) => {
       }
 
       console.log(`[resume-stream ${logId}] summary start chunks=${topChunks.length} model=${model}`);
+      sendTextEvent('progress', 'Rédaction du résumé');
       const upstream = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -454,6 +458,7 @@ const server = createServer(async (req, res) => {
       let derivedTitle = payload.title ?? '';
 
       console.log(`[qa-stream ${logId}] fetch start url=${normalized}`);
+      sendTextEvent('progress', 'Analyse de la page');
       const remote = await fetchPageContent(normalized, 12000);
 
       let contentType: 'text/html' | 'application/pdf' | 'unknown' = 'unknown';
@@ -488,6 +493,7 @@ const server = createServer(async (req, res) => {
       }
 
       console.log(`[qa-stream ${logId}] extract start contentType=${contentType}`);
+      sendTextEvent('progress', 'Extraction du contenu pertinent');
       const extraction = await extractMainText({ contentType, raw });
       let paragraphs = extraction.paragraphs;
       const title = extraction.title?.trim() || derivedTitle || normalized;
@@ -512,6 +518,7 @@ const server = createServer(async (req, res) => {
       // Retrieval using the question as query
       let topChunks: string[] = [];
       if (process.env.DB_EMBEDDING) {
+        sendTextEvent('progress', 'Repérage des passages clés');
         console.log(`[qa-stream ${logId}] retrieval start paragraphs=${paragraphs.length}`);
         const selected = await indexAndSelectTopChunks(normalized, title, paragraphs, {
           apiKey: process.env.OPENAI_API_KEY,
@@ -535,6 +542,7 @@ const server = createServer(async (req, res) => {
       }
 
       console.log(`[qa-stream ${logId}] answer start chunks=${topChunks.length} model=${model}`);
+      sendTextEvent('progress', 'Rédaction de la réponse');
       const upstream = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },

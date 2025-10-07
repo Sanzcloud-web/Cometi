@@ -39,27 +39,30 @@ export function MessageItem({ message }: MessageItemProps): JSX.Element {
         </div>
         <div className="min-w-0 flex-1">
           <p className="sr-only">Cometi</p>
-          {message.isLoading && message.text.trim().length === 0 ? (
-            <div className="h-4 w-4 animate-spin rounded-[3px] border-2 border-slate-300"></div>
+          {message.isLoading ? (
+            <div className="flex items-center gap-2 text-[15px] leading-relaxed">
+              <span className="shimmer-text">Réflexion</span>
+              {message.text ? (
+                <span className="text-slate-500">— {message.text}</span>
+              ) : null}
+            </div>
+          ) : message.isError ? (
+            <p className={`whitespace-pre-wrap text-[15px] leading-relaxed ${message.isError ? 'text-rose-600' : 'text-slate-800'}`}>
+              {message.text}
+            </p>
           ) : (
-            message.isError ? (
-              <p className={`whitespace-pre-wrap text-[15px] leading-relaxed ${message.isError ? 'text-rose-600' : 'text-slate-800'}`}>
-                {message.text}
-              </p>
-            ) : (
-              <div
-                className="prose prose-slate max-w-none text-[15px]
-                prose-h1:mt-0 prose-h1:mb-2 prose-h1:text-2xl
-                prose-h2:mt-3 prose-h2:mb-2 prose-h2:text-xl
-                prose-h3:mt-3 prose-h3:mb-2 prose-h3:text-lg
-                prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0
-                prose-a:text-blue-600 prose-a:no-underline hover:prose-a:underline
-                prose-code:bg-slate-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded
-                prose-pre:bg-slate-50 prose-pre:border prose-pre:border-slate-200 prose-pre:rounded
-                prose-img:rounded-md prose-table:my-3 prose-th:border prose-td:border prose-th:border-slate-200 prose-td:border-slate-200 prose-th:px-2 prose-th:py-1 prose-td:px-2 prose-td:py-1"
-                dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(message.text) }}
-              />
-            )
+            <div
+              className="prose prose-slate max-w-none text-[15px]
+              prose-h1:mt-0 prose-h1:mb-2 prose-h1:text-2xl
+              prose-h2:mt-3 prose-h2:mb-2 prose-h2:text-xl
+              prose-h3:mt-3 prose-h3:mb-2 prose-h3:text-lg
+              prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0
+              prose-a:text-blue-600 prose-a:no-underline hover:prose-a:underline
+              prose-code:bg-slate-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded
+              prose-pre:bg-slate-50 prose-pre:border prose-pre:border-slate-200 prose-pre:rounded
+              prose-img:rounded-md prose-table:my-3 prose-th:border prose-td:border prose-th:border-slate-200 prose-td:border-slate-200 prose-th:px-2 prose-th:py-1 prose-td:px-2 prose-td:py-1"
+              dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(message.text) }}
+            />
           )}
           {message.actions && message.actions.length > 0 ? (
             <div className="mt-2 flex flex-wrap gap-2">

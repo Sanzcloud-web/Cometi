@@ -78,7 +78,7 @@ export async function requestResumeSummaryStream(
           const payload = JSON.parse(data);
           callbacks.onProgress?.(payload);
         } catch {
-          // ignore
+          callbacks.onProgress?.({ text: data });
         }
       } else if (event === 'delta') {
         // Plain text delta

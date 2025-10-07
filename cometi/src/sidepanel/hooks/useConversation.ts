@@ -125,10 +125,13 @@ export function useConversation() {
               .replace(/(^|\n)-(\S)/g, (_m, p1, p2) => `${p1}- ${p2}`);
           const summary = await requestResumeSummaryStream({
             onProgress: (e) => {
-              // Optionally reflect stage in UI in the future
-              // For now we keep the base text and let deltas replace it progressively
-              if (e?.stage && typeof e.stage === 'string') {
-                // noop; could do: updateAssistantMessage(placeholderId, `(${e.stage})\n\n` + acc)
+              const label = typeof (e as any)?.text === 'string'
+                ? (e as any).text
+                : typeof e?.stage === 'string'
+                  ? e.stage
+                  : undefined;
+              if (label) {
+                updateAssistantMessage(placeholderId, label, { isLoading: true });
               }
             },
             onDelta: (delta) => {
@@ -190,6 +193,16 @@ export function useConversation() {
             onDelta: (delta) => {
               acc += delta;
               updateAssistantMessage(placeholderId, acc, { isLoading: false });
+            },
+            onProgress: (e) => {
+              const label = typeof (e as any)?.text === 'string'
+                ? (e as any).text
+                : typeof e?.stage === 'string'
+                  ? e.stage
+                  : undefined;
+              if (label) {
+                updateAssistantMessage(placeholderId, label, { isLoading: true });
+              }
             },
           });
           updateAssistantMessage(placeholderId, answer);

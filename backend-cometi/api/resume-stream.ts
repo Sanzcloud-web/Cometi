@@ -66,6 +66,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // no progress events
     console.log(`[resume-stream ${logId}] fetch start url=${normalized}`);
+    sendTextEvent('progress', 'Analyse de la page');
     const remote = await fetchPageContent(normalized, 12000);
 
     let contentType: 'text/html' | 'application/pdf' | 'unknown' = 'unknown';
@@ -108,6 +109,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // no progress events
     console.log(`[resume-stream ${logId}] extract start contentType=${contentType}`);
+    sendTextEvent('progress', 'Extraction du contenu principal');
     const extraction = await extractMainText({ contentType, raw });
     let paragraphs = extraction.paragraphs;
     const title = extraction.title?.trim() || derivedTitle || normalized;
@@ -147,11 +149,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const language = detectLanguage(paragraphs.join('\n'));
-    // progress disabled
     console.log(`[resume-stream ${logId}] language=${language}`);
 
     if (process.env.DB_EMBEDDING) {
-      // progress disabled
+      sendTextEvent('progress', 'Repérage des passages clés');
       console.log(`[resume-stream ${logId}] retrieval start paragraphs=${paragraphs.length}`);
       paragraphs = await indexAndSelectTopChunks(normalized, title, paragraphs, {
         apiKey: process.env.OPENAI_API_KEY,
@@ -170,7 +171,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.end();
       return;
     }
-    // no progress event for summary start
+    sendTextEvent('progress', 'Rédaction du résumé');
     console.log(`[resume-stream ${logId}] summary start chunks=${Math.min(paragraphs.length, 6)} model=${model}`);
     const upstream = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',

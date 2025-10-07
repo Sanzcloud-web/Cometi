@@ -6,6 +6,7 @@ type ResumeCommandContext = {
 
 type PageAnswerCallbacks = {
   onDelta?: (delta: string) => void;
+  onProgress?: (e: { stage?: string; text?: string }) => void;
 };
 
 const API_BASE = (import.meta.env.VITE_COMETI_API_BASE ?? '').replace(/\/+$/, '');
@@ -68,7 +69,14 @@ export async function requestPageAnswerStream(question: string, callbacks: PageA
       }
       const data = dataLines.length > 0 ? dataLines.join('\n') : undefined;
       if (!event || !data) continue;
-      if (event === 'delta') {
+      if (event === 'progress') {
+        try {
+          const payload = JSON.parse(data);
+          callbacks.onProgress?.(payload);
+        } catch {
+          callbacks.onProgress?.({ text: data });
+        }
+      } else if (event === 'delta') {
         callbacks.onDelta?.(data);
       } else if (event === 'final') {
         finalText = data;
