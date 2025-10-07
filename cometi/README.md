@@ -13,6 +13,9 @@ Front-end de l’extension Chrome qui s’appuie sur le backend Vercel (`backend
 2. Renseigne `VITE_COMETI_API_URL` :
    - `http://localhost:3000/api/chat` pour consommer le backend lancé en local (`npm run dev` dans `backend-cometi`).
    - l’URL `https://<projet>.vercel.app/api/chat` après déploiement.
+3. Ajoute également `VITE_COMETI_RESUME_URL` vers l’endpoint résumé :
+   - `http://localhost:3000/api/resume` en local.
+   - `https://<projet>.vercel.app/api/resume` en production.
 
 ## Développement
 

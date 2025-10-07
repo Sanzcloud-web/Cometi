@@ -1,24 +1,6 @@
-type ChatCompletionMessage = {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-};
-
-type ChatCompletionRequest = {
-  type: 'chat:complete';
-  payload: {
-    messages: ChatCompletionMessage[];
-  };
-};
-
-type ChatCompletionResponse =
-  | {
-      message: string;
-    }
-  | {
-      error: string;
-    };
-
-const API_URL = import.meta.env.VITE_COMETI_API_URL;
+import type { ChatCompletionMessage } from './types';
+import { createChatCompletion } from './network/chatCompletion';
+import { handleResumeCommand } from './orchestration/resumeCommand';
 
 chrome.runtime.onInstalled.addListener(async () => {
   try {
@@ -33,50 +15,37 @@ chrome.runtime.onInstalled.addListener(async () => {
   }
 });
 
-chrome.runtime.onMessage.addListener((message: ChatCompletionRequest, _sender, sendResponse) => {
-  if (message?.type !== 'chat:complete') {
-    return undefined;
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === 'chat:complete') {
+    void handleChatCompletion(message)
+      .then((assistantMessage) => {
+        sendResponse({ message: assistantMessage });
+      })
+      .catch((error: unknown) => {
+        sendResponse({
+          error: error instanceof Error ? error.message : 'Erreur inattendue lors de la requête serveur.',
+        });
+      });
+    return true;
   }
 
-  void createChatCompletion(message.payload.messages)
-    .then((assistantMessage) => {
-      const response: ChatCompletionResponse = { message: assistantMessage };
-      sendResponse(response);
-    })
-    .catch((error: unknown) => {
-      const response: ChatCompletionResponse = {
-        error: error instanceof Error ? error.message : 'Erreur inattendue lors de la requête serveur.',
-      };
-      sendResponse(response);
-    });
+  if (message?.type === 'commands:resume') {
+    void handleResumeCommand()
+      .then((result) => {
+        sendResponse({ ok: true, result });
+      })
+      .catch((error: unknown) => {
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : 'Échec inattendu de la commande /resume.',
+        });
+      });
+    return true;
+  }
 
-  return true;
+  return undefined;
 });
 
-async function createChatCompletion(messages: ChatCompletionMessage[]): Promise<string> {
-  if (!API_URL) {
-    throw new Error('URL API absente. Ajoute VITE_COMETI_API_URL dans ton fichier .env.');
-  }
-
-  const response = await fetch(API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ messages }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Le serveur a renvoyé ${response.status} : ${errorText}`);
-  }
-
-  const data = (await response.json()) as { message?: unknown; error?: string };
-
-  if (typeof data?.message !== 'string' || data.message.trim().length === 0) {
-    const backendError = data?.error ? ` (${data.error})` : '';
-    throw new Error(`Réponse invalide du serveur${backendError}.`);
-  }
-
-  return data.message.trim();
+async function handleChatCompletion(message: { payload: { messages: ChatCompletionMessage[] } }): Promise<string> {
+  return createChatCompletion(message.payload.messages);
 }

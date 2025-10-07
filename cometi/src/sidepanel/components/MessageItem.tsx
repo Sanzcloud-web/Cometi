@@ -1,9 +1,30 @@
-import type { ConversationMessage } from '../types/chat';
+import type { ConversationMessage, MessageAction } from '../types/chat';
 import { Card } from './ui/card';
 
 type MessageItemProps = {
   message: ConversationMessage;
 };
+
+function handleAction(action: MessageAction) {
+  if (action.type === 'copy') {
+    void navigator.clipboard
+      .writeText(action.value)
+      .catch((error) => console.error('[Cometi] Impossible de copier le texte', error));
+    return;
+  }
+
+  if (action.type === 'open') {
+    const url = action.url;
+    if (typeof chrome !== 'undefined' && chrome.tabs?.create) {
+      chrome.tabs.create({ url }).catch((error) => {
+        console.error('[Cometi] Impossible d\'ouvrir un nouvel onglet', error);
+        window.open(url, '_blank', 'noopener');
+      });
+    } else {
+      window.open(url, '_blank', 'noopener');
+    }
+  }
+}
 
 export function MessageItem({ message }: MessageItemProps): JSX.Element {
   const isAssistant = message.role === 'assistant';
@@ -15,6 +36,20 @@ export function MessageItem({ message }: MessageItemProps): JSX.Element {
         <p className={`whitespace-pre-line text-sm leading-relaxed ${message.isError ? 'text-rose-600' : 'text-slate-700'}`}>
           {message.text}
         </p>
+        {message.actions && message.actions.length > 0 ? (
+          <div className="flex flex-wrap gap-2 pt-1">
+            {message.actions.map((action, index) => (
+              <button
+                key={`${action.label}-${index}`}
+                type="button"
+                onClick={() => handleAction(action)}
+                className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-100"
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </Card>
     );
   }
