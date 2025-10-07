@@ -121,11 +121,7 @@ export async function generateSummarySinglePass(
   title: string,
   env: ResumeServiceEnv
 ): Promise<Omit<ResumeSummary, 'usedSources'>> {
-  const maxChars = Number(process.env.RESUME_MAX_CONTEXT_CHARS ?? 11000);
-  let combined = paragraphs.join('\n\n');
-  if (combined.length > maxChars) {
-    combined = combined.slice(0, maxChars);
-  }
+  const combined = paragraphs.join('\n\n');
   console.log(`[resume] single-pass contextLen=${combined.length}`);
 
   const messages = buildFinalSummaryPrompt(combined, language, url);

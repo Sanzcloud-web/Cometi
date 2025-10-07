@@ -35,8 +35,6 @@ function extractTitleFromHtml(html: string): string | undefined {
   return normalizeWhitespace(match[1] ?? '').slice(0, 180);
 }
 
-const MAX_CONTENT_LENGTH = 15 * 1024 * 1024;
-
 export async function fetchPageContent(url: string, timeoutMs: number): Promise<PageFetchResult> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -52,28 +50,14 @@ export async function fetchPageContent(url: string, timeoutMs: number): Promise<
       return { success: false, error: `Le serveur a répondu ${response.status}.` };
     }
 
-    const contentLengthHeader = response.headers.get('content-length');
-    if (contentLengthHeader) {
-      const contentLength = Number(contentLengthHeader);
-      if (Number.isFinite(contentLength) && contentLength > MAX_CONTENT_LENGTH) {
-        return { success: false, error: 'Le contenu distant dépasse la limite autorisée de 15 MB.' };
-      }
-    }
-
     const contentType = detectContentType(response.headers.get('content-type'));
 
     if (contentType === 'application/pdf') {
       const buffer = await response.arrayBuffer();
-      if (buffer.byteLength > MAX_CONTENT_LENGTH) {
-        return { success: false, error: 'Le PDF récupéré dépasse la limite autorisée de 15 MB.' };
-      }
       return { success: true, contentType, body: buffer };
     }
 
     const text = await response.text();
-    if (text.length > MAX_CONTENT_LENGTH) {
-      return { success: false, error: 'Le document HTML récupéré dépasse la limite autorisée.' };
-    }
 
     return {
       success: true,
