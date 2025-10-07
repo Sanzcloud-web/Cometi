@@ -4,11 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vercel dev"
+    "dev": "tsx watch src/dev-server.ts",
+    "vercel:dev": "vercel dev"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@vercel/node": "^3.2.12"
+  },
   "devDependencies": {
     "@types/node": "^20.12.7",
-    "typescript": "^5.4.5"
+    "typescript": "^5.4.5",
+    "tsx": "^4.7.0",
+    "vercel": "^48.2.2"
   }
 }

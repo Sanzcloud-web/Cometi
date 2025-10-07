@@ -10,7 +10,9 @@ Front-end de l’extension Chrome qui s’appuie sur le backend Vercel (`backend
 ## Configuration
 
 1. Copie `.env.example` vers `.env`.
-2. Renseigne `VITE_COMETI_API_URL` avec l’URL de l’endpoint `/api/chat` du backend.
+2. Renseigne `VITE_COMETI_API_URL` :
+   - `http://localhost:3000/api/chat` pour consommer le backend lancé en local (`npm run dev` dans `backend-cometi`).
+   - l’URL `https://<projet>.vercel.app/api/chat` après déploiement.
 
 ## Développement
 

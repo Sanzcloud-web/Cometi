@@ -9,7 +9,7 @@ API serverless pour relayer les requêtes vers OpenAI. Conçu pour être déploy
    - `OPENAI_MODEL` : identifiant de modèle (ex. `gpt-4o-mini`).
    - `ORIGIN` : domaine autorisé pour le CORS (ex. `chrome-extension://...`). Laisse `*` pour du debug.
 
-2. Installe les dépendances (optionnel mais recommandé pour le typage) :
+2. Installe les dépendances :
 
    ```bash
    npm install
@@ -18,10 +18,17 @@ API serverless pour relayer les requêtes vers OpenAI. Conçu pour être déploy
 3. Pour tester en local :
 
    ```bash
-   npx vercel dev
+   npm run dev
    ```
 
    L’API sera accessible sur `http://localhost:3000/api/chat`.
+   > Ce serveur de développement est un petit serveur Node.js (pas besoin du CLI Vercel).
+
+4. Pour simuler exactement l’environnement Vercel (optionnel) :
+
+   ```bash
+   npm run vercel:dev
+   ```
 
 ## Déploiement Vercel
 
