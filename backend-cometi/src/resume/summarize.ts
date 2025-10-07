@@ -21,7 +21,7 @@ type FinalSummaryPayload = {
   summary: string;
 };
 
-function sanitizeJsonPayload(raw: string): unknown {
+export function sanitizeJsonPayload(raw: string): unknown {
   const cleaned = raw.replace(/```json|```/g, '').trim();
   try {
     return JSON.parse(cleaned);
@@ -46,7 +46,7 @@ async function summarizeChunk(text: string, language: string, env: ResumeService
   return requestCompletion(messages, env);
 }
 
-function buildFinalSummaryPrompt(text: string, language: string, url: string): ChatMessage[] {
+export function buildFinalSummaryPrompt(text: string, language: string, url: string): ChatMessage[] {
   const systemPrompt =
     'Tu es un assistant de résumé méticuleux. Retourne toujours un objet JSON avec les champs "tldr" (tableau de 3 à 5 puces concises) et "summary" (un paragraphe de 150 à 220 mots). Sois fidèle au texte fourni.';
   const userPrompt =

@@ -1,6 +1,6 @@
 import type { ChatCompletionMessage } from './types';
 import { createChatCompletion } from './network/chatCompletion';
-import { handleResumeCommand } from './orchestration/resumeCommand';
+import { handleResumeCommand, buildResumeContext } from './orchestration/resumeCommand';
 
 chrome.runtime.onInstalled.addListener(async () => {
   try {
@@ -38,6 +38,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse({
           ok: false,
           error: error instanceof Error ? error.message : 'Échec inattendu de la commande /resume.',
+        });
+      });
+    return true;
+  }
+
+  if (message?.type === 'commands:resume:context') {
+    void buildResumeContext()
+      .then((payload) => {
+        sendResponse({ ok: true, payload });
+      })
+      .catch((error: unknown) => {
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : 'Échec inattendu lors de la récupération du contexte /resume.',
         });
       });
     return true;

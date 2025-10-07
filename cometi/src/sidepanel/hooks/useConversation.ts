@@ -1,6 +1,7 @@
 import { FormEvent, useRef, useState } from 'react';
 import { requestChatCompletion, requestChatCompletionStream } from '../services/chatClient';
 import { requestResumeSummary } from '../services/resumeCommand';
+import { requestResumeSummaryStream } from '../services/resumeStream';
 import type { ChromeChatMessage, ConversationMessage, MessageAction } from '../types/chat';
 import type { ResumeSummary } from '../types/resume';
 
@@ -129,7 +130,20 @@ export function useConversation() {
 
       void (async () => {
         try {
-          const summary = await requestResumeSummary();
+          let acc = '';
+          const summary = await requestResumeSummaryStream({
+            onProgress: (e) => {
+              // Optionally reflect stage in UI in the future
+              // For now we keep the base text and let deltas replace it progressively
+              if (e?.stage && typeof e.stage === 'string') {
+                // noop; could do: updateAssistantMessage(placeholderId, `(${e.stage})\n\n` + acc)
+              }
+            },
+            onDelta: (delta) => {
+              acc += delta;
+              updateAssistantMessage(placeholderId, acc);
+            },
+          });
           const formatted = formatResumeSummary(summary);
           updateAssistantMessage(placeholderId, formatted.text, { actions: formatted.actions });
         } catch (error: unknown) {

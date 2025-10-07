@@ -4,7 +4,7 @@ import { logger } from '../utils/logger';
 import { normalizeUrl } from '../utils/url';
 import type { ResumeCommandResult } from '../types';
 
-type ResumeCommandPayload = {
+export type ResumeCommandPayload = {
   url: string;
   title?: string;
   domSnapshot?: {
@@ -41,7 +41,7 @@ function isValidResumeResult(payload: unknown): payload is ResumeCommandResult {
   );
 }
 
-export async function handleResumeCommand(): Promise<ResumeCommandResult> {
+export async function buildResumeContext(): Promise<ResumeCommandPayload> {
   const tab = await getActiveHttpTab();
   const normalizedUrl = normalizeUrl(tab.url ?? '');
 
@@ -58,6 +58,11 @@ export async function handleResumeCommand(): Promise<ResumeCommandResult> {
       logger.debug('Capture DOM indisponible', { reason: dom.error });
     }
   }
+  return payload;
+}
+
+export async function handleResumeCommand(): Promise<ResumeCommandResult> {
+  const payload = await buildResumeContext();
 
   const response = await fetch(ensureResumeApiUrl(), {
     method: 'POST',
