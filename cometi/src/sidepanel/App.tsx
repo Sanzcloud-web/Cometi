@@ -129,7 +129,9 @@ export function App(): JSX.Element {
         })
         .catch((error: unknown) => {
           const message =
-            error instanceof Error ? error.message : "Une erreur inattendue est survenue lors de l'appel à OpenAI.";
+            error instanceof Error
+              ? error.message
+              : "Une erreur inattendue est survenue lors de l'appel au backend Cometi.";
           appendAssistantMessage(message, { isError: true });
         })
         .finally(() => {

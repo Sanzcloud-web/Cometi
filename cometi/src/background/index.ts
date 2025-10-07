@@ -18,8 +18,7 @@ type ChatCompletionResponse =
       error: string;
     };
 
-const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY;
-const OPENAI_MODEL = import.meta.env.VITE_OPENAI_MODEL ?? 'gpt-4o-mini';
+const API_URL = import.meta.env.VITE_COMETI_API_URL;
 
 chrome.runtime.onInstalled.addListener(async () => {
   try {
@@ -46,7 +45,7 @@ chrome.runtime.onMessage.addListener((message: ChatCompletionRequest, _sender, s
     })
     .catch((error: unknown) => {
       const response: ChatCompletionResponse = {
-        error: error instanceof Error ? error.message : 'Erreur inattendue lors de la requête OpenAI.',
+        error: error instanceof Error ? error.message : 'Erreur inattendue lors de la requête serveur.',
       };
       sendResponse(response);
     });
@@ -55,35 +54,29 @@ chrome.runtime.onMessage.addListener((message: ChatCompletionRequest, _sender, s
 });
 
 async function createChatCompletion(messages: ChatCompletionMessage[]): Promise<string> {
-  if (!OPENAI_API_KEY) {
-    throw new Error('Clé API absente. Ajoute VITE_OPENAI_API_KEY dans ton fichier .env.');
+  if (!API_URL) {
+    throw new Error('URL API absente. Ajoute VITE_COMETI_API_URL dans ton fichier .env.');
   }
 
-  const requestBody = JSON.stringify({
-    model: OPENAI_MODEL,
-    messages,
-  });
-
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+  const response = await fetch(API_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
     },
-    body: requestBody,
+    body: JSON.stringify({ messages }),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`OpenAI a renvoyé ${response.status} : ${errorText}`);
+    throw new Error(`Le serveur a renvoyé ${response.status} : ${errorText}`);
   }
 
-  const data = await response.json();
-  const content: unknown = data?.choices?.[0]?.message?.content;
+  const data = (await response.json()) as { message?: unknown; error?: string };
 
-  if (typeof content !== 'string' || content.trim().length === 0) {
-    throw new Error('OpenAI a renvoyé une réponse vide.');
+  if (typeof data?.message !== 'string' || data.message.trim().length === 0) {
+    const backendError = data?.error ? ` (${data.error})` : '';
+    throw new Error(`Réponse invalide du serveur${backendError}.`);
   }
 
-  return content.trim();
+  return data.message.trim();
 }
