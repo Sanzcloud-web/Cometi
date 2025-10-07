@@ -44,6 +44,43 @@ export async function getDocumentChunks(url: string) {
       content: chunk.content,
       embedding: bytesToFloat32(Buffer.from(chunk.embedding)),
       dim: chunk.dim,
+      chunkHash: (chunk as any).chunkHash ?? undefined,
     }));
 }
 
+export async function getDocumentWithChunks(url: string) {
+  const prisma = getPrisma();
+  return prisma.document.findUnique({ where: { url }, include: { chunks: true } });
+}
+
+export async function updateDocumentMeta(
+  documentId: string,
+  meta: { contentHash?: string; embeddingModel?: string; chunkCount?: number; title?: string }
+) {
+  const prisma = getPrisma();
+  return prisma.document.update({ where: { id: documentId }, data: meta as any });
+}
+
+export async function upsertChunk(
+  documentId: string,
+  index: number,
+  content: string,
+  embedding: Float32Array,
+  dim: number,
+  chunkHash?: string
+) {
+  const prisma = getPrisma();
+  const bytes = float32ToBytes(embedding);
+  const updateData: any = { content, embedding: bytes, dim, chunkHash };
+  const createData: any = { documentId, index, content, embedding: bytes, dim, chunkHash };
+  return prisma.chunk.upsert({
+    where: { documentId_index: { documentId, index } },
+    update: updateData,
+    create: createData,
+  });
+}
+
+export async function deleteChunksFromIndex(documentId: string, startIndex: number) {
+  const prisma = getPrisma();
+  await prisma.chunk.deleteMany({ where: { documentId, index: { gte: startIndex } } });
+}
