@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { URL } from 'node:url';
 import { processChatRequest, type ChatPayload } from './chat-service';
@@ -74,4 +75,6 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, () => {
   // eslint-disable-next-line no-console
   console.log(`Cometi backend dev server prêt sur http://localhost:${PORT}/api/chat`);
+  // eslint-disable-next-line no-console
+  console.log(`[env] OPENAI_API_KEY présent: ${Boolean(process.env.OPENAI_API_KEY)} | OPENAI_MODEL: ${process.env.OPENAI_MODEL ?? 'gpt-4o-mini'} | ORIGIN: ${ORIGIN}`);
 });

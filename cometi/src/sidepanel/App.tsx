@@ -1,37 +1,13 @@
 import { FormEvent, useRef, useState } from 'react';
-
-type Role = 'user' | 'assistant';
-
-type Message = {
-  id: number;
-  role: Role;
-  text: string;
-  isError?: boolean;
-};
-
-type BackgroundChatRequest = {
-  type: 'chat:complete';
-  payload: {
-    messages: ChromeChatMessage[];
-  };
-};
-
-type BackgroundChatResponse = {
-  message?: string;
-  error?: string;
-};
-
-type ChromeChatMessage = {
-  role: Role | 'system';
-  content: string;
-};
+import { requestChatCompletion } from './chatClient';
+import type { ChromeChatMessage, ConversationMessage } from './types';
 
 const systemPrompt: ChromeChatMessage = {
   role: 'system',
   content: 'Tu es Cometi, un assistant de discussion sympathique et utile qui répond en français.',
 };
 
-const starterMessages: Message[] = [
+const starterMessages: ConversationMessage[] = [
   {
     id: 0,
     role: 'assistant',
@@ -40,7 +16,7 @@ const starterMessages: Message[] = [
 ];
 
 export function App(): JSX.Element {
-  const [messages, setMessages] = useState<Message[]>(starterMessages);
+  const [messages, setMessages] = useState<ConversationMessage[]>(starterMessages);
   const [draft, setDraft] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const idRef = useRef(starterMessages.length - 1);
@@ -51,7 +27,7 @@ export function App(): JSX.Element {
   };
 
   const appendAssistantMessage = (text: string, options?: { isError?: boolean }) => {
-    const assistantMessage: Message = {
+    const assistantMessage: ConversationMessage = {
       id: getNextMessageId(),
       role: 'assistant',
       text,
@@ -60,11 +36,7 @@ export function App(): JSX.Element {
     setMessages((prev) => [...prev, assistantMessage]);
   };
 
-  const requestAssistantReply = async (history: Message[]) => {
-    if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) {
-      throw new Error("L'API Chrome n'est pas disponible. Charge l'extension dans Chrome pour discuter avec Cometi.");
-    }
-
+  const requestAssistantReply = async (history: ConversationMessage[]) => {
     const payloadMessages: ChromeChatMessage[] = [
       systemPrompt,
       ...history.map<ChromeChatMessage>((message) => ({
@@ -73,36 +45,7 @@ export function App(): JSX.Element {
       })),
     ];
 
-    const request: BackgroundChatRequest = {
-      type: 'chat:complete',
-      payload: { messages: payloadMessages },
-    };
-
-    return new Promise<string>((resolve, reject) => {
-      chrome.runtime.sendMessage(request, (response?: BackgroundChatResponse) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
-
-        if (!response) {
-          reject(new Error('Réponse vide du service d’arrière-plan.'));
-          return;
-        }
-
-        if (response.error) {
-          reject(new Error(response.error));
-          return;
-        }
-
-        if (typeof response.message !== 'string' || response.message.trim().length === 0) {
-          reject(new Error('Réponse invalide du service d’arrière-plan.'));
-          return;
-        }
-
-        resolve(response.message.trim());
-      });
-    });
+    return requestChatCompletion(payloadMessages);
   };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -112,7 +55,7 @@ export function App(): JSX.Element {
       return;
     }
 
-    const userMessage: Message = {
+    const userMessage: ConversationMessage = {
       id: getNextMessageId(),
       role: 'user',
       text: content,

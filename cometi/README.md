@@ -18,10 +18,11 @@ Front-end de l’extension Chrome qui s’appuie sur le backend Vercel (`backend
 
 ```bash
 npm install
+# Ouvre ensuite http://localhost:5173/sidepanel.html pour tester l’UI hors extension.
 npm run dev
 ```
 
-Chrome ne supporte pas encore le hot reload du side panel, mais `npm run dev` permet de recompiler rapidement.
+Chrome ne supporte pas encore le hot reload du side panel, mais `npm run dev` te permet de tester l’UI directement dans le navigateur tout en parlant au backend (le code bascule automatiquement sur l’appel HTTP si l’API Chrome n’est pas dispo).
 
 ## Build
 
@@ -33,4 +34,4 @@ Le dossier `dist/` généré peut être chargé en tant qu’extension non empaq
 
 ## Permissions
 
-- `host_permissions` inclut `https://*.vercel.app/*` et `http://localhost:3000/*` pour autoriser le backend. Ajuste-les si tu déploies ailleurs.
+- `host_permissions` inclut `https://*.vercel.app/*`, `http://localhost:3000/*` et `http://127.0.0.1:3000/*`. Ajuste-les si tu déploies ailleurs.
