@@ -119,6 +119,33 @@ export function buildSimpleSummaryTextPromptFromChunks(
   ];
 }
 
+export function buildPageAnswerTextPromptFromChunks(
+  topChunks: string[],
+  language: string,
+  url: string,
+  question: string
+): ChatMessage[] {
+  const systemPrompt = [
+    `Tu es un assistant qui répond précisément aux questions en ${language} en utilisant UNIQUEMENT le contexte fourni.`,
+    MARKDOWN_GUIDELINES_FR,
+    'Règles: pas d’invention, cite uniquement des faits présents dans le contexte. Si le contexte est insuffisant, dis-le clairement.',
+  ].join('\n\n');
+
+  const joined = topChunks.join('\n\n');
+  const userPrompt = [
+    `URL: ${url}`,
+    `QUESTION: ${question}`,
+    '',
+    'CONTEXTE SÉLECTIONNÉ:',
+    joined,
+  ].join('\n');
+
+  return [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userPrompt },
+  ];
+}
+
 export async function generateSummary(
   paragraphs: string[],
   language: string,

@@ -1,6 +1,7 @@
 import { FormEvent, useRef, useState } from 'react';
 import { requestChatCompletion, requestChatCompletionStream } from '../services/chatClient';
 import { requestResumeSummaryStream } from '../services/resumeStream';
+import { requestPageAnswerStream, requestResumeContext } from '../services/pageAnswerStream';
 import type { ChromeChatMessage, ConversationMessage, MessageAction } from '../types/chat';
 import { MARKDOWN_GUIDELINES_FR } from '../../shared/markdownGuidelines';
 
@@ -158,35 +159,67 @@ export function useConversation() {
       return;
     }
 
-    // Regular chat flow
-    // Streaming chat flow
+    // Heuristic: ask the model-router if page context is needed
     setMessages((prev) => [...prev, userMessage]);
     const placeholderId = appendAssistantMessage('', { isLoading: true });
-    let acc = '';
-    let first = true;
 
-    void requestAssistantReply([...messages, userMessage], (delta) => {
-      acc += delta;
-      if (first) {
-        first = false;
-        updateAssistantMessage(placeholderId, acc, { isLoading: false });
-      } else {
-        updateAssistantMessage(placeholderId, acc);
-      }
-    })
-      .then((finalText) => {
-        updateAssistantMessage(placeholderId, finalText);
-      })
-      .catch((error: unknown) => {
+    void (async () => {
+      try {
+        const API_BASE = (import.meta.env.VITE_COMETI_API_BASE ?? '').replace(/\/+$/, '');
+        const hasApi = API_BASE.length > 0;
+        let usePage = false;
+        if (hasApi) {
+          let pageUrl = '';
+          try {
+            const ctx = await requestResumeContext();
+            pageUrl = ctx.url;
+          } catch { /* ignore */ }
+          // Router prompt: return only <USE_PAGE_CONTEXT/> or <NO_PAGE_CONTEXT/>
+          const routerSystem: ChromeChatMessage = {
+            role: 'system',
+            content:
+              `Tu es un routeur. Page courante: ${pageUrl}. Si la question a besoin du CONTENU de cette page pour répondre précisément (ou si la requête y fait implicitement référence), réponds UNIQUEMENT par <USE_PAGE_CONTEXT/>. Sinon réponds UNIQUEMENT par <NO_PAGE_CONTEXT/>.`,
+          };
+          const decision = await requestChatCompletion([routerSystem, { role: 'user', content }]);
+          usePage = /<USE_PAGE_CONTEXT\/>/i.test(decision);
+        }
+
+        if (usePage) {
+          let acc = '';
+          const answer = await requestPageAnswerStream(content, {
+            onDelta: (delta) => {
+              acc += delta;
+              updateAssistantMessage(placeholderId, acc, { isLoading: false });
+            },
+          });
+          updateAssistantMessage(placeholderId, answer);
+          return;
+        }
+
+        // Fallback: regular streaming chat
+        let acc = '';
+        let first = true;
+        await requestAssistantReply([...messages, userMessage], (delta) => {
+          acc += delta;
+          if (first) {
+            first = false;
+            updateAssistantMessage(placeholderId, acc, { isLoading: false });
+          } else {
+            updateAssistantMessage(placeholderId, acc);
+          }
+        }).then((finalText) => {
+          updateAssistantMessage(placeholderId, finalText);
+        });
+      } catch (error: unknown) {
         const message =
           error instanceof Error
             ? error.message
             : "Une erreur inattendue est survenue lors de l'appel au backend Cometi.";
         updateAssistantMessage(placeholderId, message, { isError: true });
-      })
-      .finally(() => {
+      } finally {
         setIsLoading(false);
-      });
+      }
+    })();
   };
 
   return {

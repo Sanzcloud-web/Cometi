@@ -9,7 +9,8 @@ export async function indexAndSelectTopChunks(
   url: string,
   title: string,
   paragraphs: string[],
-  env: ResumeServiceEnv
+  env: ResumeServiceEnv,
+  queryText?: string
 ): Promise<string[]> {
   // If DB_EMBEDDING is not set, skip indexing/retrieval.
   if (!process.env.DB_EMBEDDING) return paragraphs;
@@ -74,7 +75,7 @@ export async function indexAndSelectTopChunks(
   }
 
   // 3) Compute query embedding for retrieval
-  const query = process.env.RESUME_QUERY?.trim() || 'RESUME';
+  const query = (queryText && queryText.trim()) || process.env.RESUME_QUERY?.trim() || 'RESUME';
   const [queryEmbedding] = await embedTexts([query], env);
 
   // 4) Retrieve top K from DB
