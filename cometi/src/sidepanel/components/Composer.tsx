@@ -1,5 +1,5 @@
 import type { FormEvent } from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { PaperAirplaneIcon } from './icons';
@@ -26,7 +26,8 @@ export function Composer({ draft, onDraftChange, onSubmit, isSubmitting }: Compo
     textarea.style.overflowY = textarea.scrollHeight > nextHeight ? 'auto' : 'hidden';
   };
 
-  useEffect(() => {
+  // Measure before paint to avoid initial oversize flicker
+  useLayoutEffect(() => {
     if (textareaRef.current) {
       adjustTextareaSize(textareaRef.current);
     }
@@ -126,7 +127,8 @@ export function Composer({ draft, onDraftChange, onSubmit, isSubmitting }: Compo
             }
           }
         }}
-        style={{ overflowY: 'hidden' }}
+        // Set an initial height to prevent first-render jump
+        style={{ overflowY: 'hidden', height: 44 }}
       />
       <SlashCommandMenu
         open={isSlashOpen}

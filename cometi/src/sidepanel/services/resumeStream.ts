@@ -35,7 +35,7 @@ async function requestResumeContext(): Promise<ResumeCommandContext> {
 
 export async function requestResumeSummaryStream(
   callbacks: ResumeStreamCallbacks = {}
-): Promise<ResumeSummary> {
+): Promise<string> {
   if (!RESUME_STREAM_URL) {
     throw new Error(
       'URL API /resume-stream absente. Ajoute VITE_COMETI_API_BASE (ex: http://localhost:3000/api) dans ton fichier .env.'
@@ -58,7 +58,30 @@ export async function requestResumeSummaryStream(
   const reader = response.body.getReader();
   const decoder = new TextDecoder('utf-8');
   let buffer = '';
-  let final: ResumeSummary | undefined;
+  let finalText: string | undefined;
+  function tryFormatFinalFromJson(data: string): string | undefined {
+    try {
+      const obj = JSON.parse(data) as Partial<ResumeSummary> | { message?: string };
+      if (
+        obj &&
+        typeof (obj as any).summary === 'string' &&
+        Array.isArray((obj as any).tldr) &&
+        Array.isArray((obj as any).usedSources)
+      ) {
+        const r = obj as ResumeSummary;
+        const header = r.title ? `${r.title}\n\n` : '';
+        const bullets = r.tldr.map((it) => `• ${it}`).join('\n');
+        const sources = r.usedSources.map((src, i) => `• Source ${i + 1} : ${src}`).join('\n');
+        return `${header}${bullets ? `TL;DR\n${bullets}\n\n` : ''}Résumé\n${r.summary}$${r.usedSources.length ? `\n\nSources\n${sources}` : ''}`.replace('$', '');
+      }
+      if (typeof (obj as any)?.message === 'string') {
+        return (obj as any).message as string;
+      }
+    } catch {
+      // not JSON → ignore
+    }
+    return undefined;
+  }
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -82,18 +105,24 @@ export async function requestResumeSummaryStream(
           // ignore
         }
       } else if (event === 'delta') {
+        // Accept either JSON { delta: "..." } or plain text
+        let emitted = false;
         try {
           const payload = JSON.parse(data) as { delta?: string };
-          if (payload.delta) callbacks.onDelta?.(payload.delta);
+          if (payload && typeof payload.delta === 'string') {
+            callbacks.onDelta?.(payload.delta);
+            emitted = true;
+          }
         } catch {
-          // ignore
+          // not JSON
+        }
+        if (!emitted) {
+          callbacks.onDelta?.(data);
         }
       } else if (event === 'final') {
-        try {
-          final = JSON.parse(data) as ResumeSummary;
-        } catch {
-          // ignore
-        }
+        // Accept either structured JSON or plain text
+        const formatted = tryFormatFinalFromJson(data);
+        finalText = formatted ?? data;
       } else if (event === 'error') {
         try {
           const payload = JSON.parse(data);
@@ -105,10 +134,10 @@ export async function requestResumeSummaryStream(
     }
   }
 
-  if (!final) {
+  if (!finalText) {
     throw new Error('Le streaming /resume ne s\'est pas conclu correctement.');
   }
-  return final;
+  return finalText;
 }
 
 // Extract a human-readable preview of the `summary` string being streamed as JSON.
@@ -158,3 +187,110 @@ export function extractSummaryPreview(raw: string): string | null {
   return out.length > 0 ? out : null;
 }
 
+// Build a formatted preview from partial JSON chunks to avoid raw JSON flicker
+// and keep a consistent layout with the final message.
+export function extractPartialResumePreview(
+  raw: string
+): {
+  title?: string;
+  tldr?: string[];
+  summary?: string;
+  usedSources?: string[];
+  formatted?: string;
+} | null {
+  if (!raw || raw.length === 0) return null;
+  const s = raw.replace(/```json|```/g, '');
+
+  function parseJsonStringAt(str: string, startIndex: number): { value?: string; end: number } {
+    let i = startIndex;
+    if (str[i] !== '"') return { end: i };
+    i++; // inside
+    let out = '';
+    let escaped = false;
+    for (; i < str.length; i++) {
+      const ch = str[i];
+      if (escaped) {
+        if (ch === 'n') out += '\n';
+        else if (ch === 'r') out += '\r';
+        else if (ch === 't') out += '\t';
+        else if (ch === '"') out += '"';
+        else if (ch === '\\') out += '\\';
+        else out += ch;
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        i++; // move past closing quote
+        break;
+      }
+      out += ch;
+    }
+    return { value: out, end: i };
+  }
+
+  function findKey(str: string, key: string): number {
+    return str.indexOf(`"${key}"`);
+  }
+
+  function parseAfterColon(str: string, i: number): number {
+    while (i < str.length && str[i] !== ':') i++;
+    if (i < str.length) i++;
+    while (i < str.length && /\s/.test(str[i])) i++;
+    return i;
+  }
+
+  function parseStringField(str: string, key: string): string | undefined {
+    const k = findKey(str, key);
+    if (k === -1) return undefined;
+    let i = parseAfterColon(str, k + key.length + 2);
+    const { value } = parseJsonStringAt(str, i);
+    return value;
+  }
+
+  function parseStringArrayField(str: string, key: string): string[] | undefined {
+    const k = findKey(str, key);
+    if (k === -1) return undefined;
+    let i = parseAfterColon(str, k + key.length + 2);
+    if (i >= str.length || str[i] !== '[') return undefined;
+    i++; // past [
+    const items: string[] = [];
+    // parse items like "...", possibly separated by commas; stops on ']' or end
+    while (i < str.length) {
+      while (i < str.length && /\s|,/.test(str[i])) i++;
+      if (i >= str.length) break;
+      if (str[i] === ']') break;
+      const { value, end } = parseJsonStringAt(str, i);
+      if (typeof value === 'string') {
+        items.push(value);
+        i = end;
+      } else {
+        break; // cannot parse further without a starting quote
+      }
+    }
+    return items.length > 0 ? items : undefined;
+  }
+
+  const title = parseStringField(s, 'title');
+  const summary = parseStringField(s, 'summary');
+  const tldr = parseStringArrayField(s, 'tldr');
+  const usedSources = parseStringArrayField(s, 'usedSources');
+
+  if (!title && !summary && (!tldr || tldr.length === 0) && (!usedSources || usedSources.length === 0)) {
+    return null;
+  }
+
+  const header = title ? `${title}\n\n` : '';
+  const bullets = tldr && tldr.length > 0 ? tldr.map((it) => `• ${it}`).join('\n') + '\n\n' : '';
+  const body = summary ? `Résumé\n${summary}\n\n` : '';
+  const sources = usedSources && usedSources.length > 0
+    ? usedSources.map((src, i) => `• Source ${i + 1} : ${src}`).join('\n')
+    : '';
+
+  const formatted = `${header}${bullets ? `TL;DR\n${bullets}` : ''}${body}${sources ? `Sources\n${sources}` : ''}`.trim();
+
+  return { title, tldr, summary, usedSources, formatted: formatted.length > 0 ? formatted : undefined };
+}
