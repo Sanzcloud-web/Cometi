@@ -22,7 +22,7 @@ export function App(): JSX.Element {
   const latestPrompt = useMemo(() => getLatestUserPrompt(messages), [messages]);
 
   return (
-    <div className="flex h-screen flex-col bg-slate-100 text-slate-900">
+    <div className="flex h-screen flex-col text-slate-900">
       <AppHeader />
 
       <main className="flex-1 overflow-hidden px-4 py-6 sm:px-6">

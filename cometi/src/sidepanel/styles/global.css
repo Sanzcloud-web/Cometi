@@ -7,10 +7,25 @@
 }
 
 body {
-  @apply bg-slate-100 text-slate-900 font-sans antialiased;
+  @apply font-sans antialiased text-slate-900;
+  background: radial-gradient(circle at top left, rgba(79, 70, 229, 0.08), transparent 55%),
+    radial-gradient(circle at top right, rgba(16, 185, 129, 0.08), transparent 60%),
+    #f6f7f9;
+  min-height: 100vh;
 }
 
 textarea:disabled,
 button:disabled {
   cursor: not-allowed;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.5);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
