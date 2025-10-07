@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
-  "name": "Extend Sidebar Chat",
+  "name": "Cometi",
   "version": "0.1.0",
-  "description": "Exemple d'extension Chrome avec panneau latéral pour un chat React.",
+  "description": "Cometi, un chat React pensé pour le panneau latéral de Chrome.",
   "action": {
-    "default_title": "Ouvrir le chat",
+    "default_title": "Ouvrir Cometi",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",
