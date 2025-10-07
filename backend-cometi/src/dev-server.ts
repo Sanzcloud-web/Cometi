@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { URL } from 'node:url';
 import { processChatRequest, type ChatPayload } from './chat-service';
+import { processSuggestionRequest, type SuggestionPayload } from './suggestions-service';
 import { processResumeRequest, type ResumeRequestPayload } from './resume';
 import { fetchPageContent } from './resume/network/fetchPageContent';
 import { extractMainText } from './resume/extractMainText';
@@ -69,6 +70,29 @@ const server = createServer(async (req, res) => {
       const result = await processChatRequest(payload, {
         apiKey: process.env.OPENAI_API_KEY,
         model: process.env.OPENAI_MODEL,
+      });
+
+      sendJson(res, result.status, result.body);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erreur serveur inattendue.';
+      sendJson(res, 500, { error: message });
+    }
+    return;
+  }
+
+  if (url.pathname === '/api/suggestions') {
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { error: 'Méthode non autorisée.' });
+      return;
+    }
+
+    try {
+      const rawBody = await readBody(req);
+      const payload = rawBody.length > 0 ? (JSON.parse(rawBody) as SuggestionPayload) : undefined;
+
+      const result = await processSuggestionRequest(payload, {
+        apiKey: process.env.OPENAI_API_KEY,
+        model: process.env.OPENAI_SUGGESTIONS_MODEL ?? process.env.OPENAI_MODEL,
       });
 
       sendJson(res, result.status, result.body);
