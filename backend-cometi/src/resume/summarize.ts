@@ -1,5 +1,6 @@
 import type { ChatMessage } from '../chat-service';
 import { processChatRequest } from '../chat-service';
+import { MARKDOWN_GUIDELINES_FR } from '../prompts/markdownGuidelines';
 import type { ResumeServiceEnv, ResumeSummary } from './types';
 import { chunkText } from './utils/text';
 
@@ -60,8 +61,10 @@ export function buildFinalSummaryPrompt(text: string, language: string, url: str
 
 // Version texte (non-JSON) pour le streaming
 export function buildFinalSummaryTextPrompt(text: string, language: string, url: string): ChatMessage[] {
-  const systemPrompt =
-    "Tu es un assistant qui rédige un résumé clair, bien aéré et lisible en Markdown. Interdictions absolues: pas de JSON, pas de balises HTML, pas de blocs de code. Respecte strictement l'espacement normal entre les mots. Commence directement par le contenu demandé, sans préambule.";
+  const systemPrompt = [
+    'Tu es un assistant qui rédige un résumé clair, bien aéré et lisible en Markdown.',
+    MARKDOWN_GUIDELINES_FR,
+  ].join('\n\n');
   const userPrompt = `Langue attendue : ${language}. À partir du contenu suivant provenant de ${url}, produis un résumé en Markdown avec la structure EXACTE suivante :\n\n` +
     [
       '## TL;DR',
@@ -88,19 +91,17 @@ export function buildSimpleSummaryTextPromptFromChunks(
   language: string,
   url: string
 ): ChatMessage[] {
-  const systemPrompt =
-    [
-      `Tu es un assistant qui rédige des résumés clairs et lisibles en ${language}.`,
-      "Interdictions absolues: pas de JSON, pas de balises HTML, pas de blocs de code.",
-      "Respecte STRICTEMENT les espaces entre les mots et la ponctuation.",
-      "Insère des retours à la ligne (\n) pour séparer titres, puces et paragraphes.",
-      "Structure exactement comme suit et commence immédiatement par le contenu demandé:",
-      "## TL;DR",
-      "- 3 à 5 puces, chaque ligne commence par '- ' (tiret + espace).",
-      "",
-      "## Résumé",
-      "Un ou deux paragraphes concis (150 à 220 mots au total). Reste factuel, sans spéculation.",
-    ].join('\n');
+  const systemPrompt = [
+    `Tu es un assistant qui rédige des résumés clairs et lisibles en ${language}.`,
+    MARKDOWN_GUIDELINES_FR,
+    '',
+    'Structure exigée pour ce résumé:',
+    '## TL;DR',
+    "- 3 à 5 puces, chaque ligne commence par '- ' (tiret + espace).",
+    '',
+    '## Résumé',
+    'Un ou deux paragraphes concis (150 à 220 mots au total). Reste factuel, sans spéculation.',
+  ].join('\n');
 
   const joined = topChunks.join('\n\n');
   const userPrompt =

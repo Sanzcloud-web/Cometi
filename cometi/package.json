@@ -9,11 +9,15 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "markdown-it": "^13.0.1",
+    "markdown-it-footnote": "^3.0.3",
+    "markdown-it-task-lists": "^2.1.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.248",
+    "@types/markdown-it": "^14.1.2",
     "@types/react": "^18.2.24",
     "@types/react-dom": "^18.2.9",
     "@vitejs/plugin-react": "^4.1.0",

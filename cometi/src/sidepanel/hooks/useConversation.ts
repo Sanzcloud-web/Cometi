@@ -2,10 +2,15 @@ import { FormEvent, useRef, useState } from 'react';
 import { requestChatCompletion, requestChatCompletionStream } from '../services/chatClient';
 import { requestResumeSummaryStream } from '../services/resumeStream';
 import type { ChromeChatMessage, ConversationMessage, MessageAction } from '../types/chat';
+import { MARKDOWN_GUIDELINES_FR } from '../../shared/markdownGuidelines';
 
 const SYSTEM_PROMPT: ChromeChatMessage = {
   role: 'system',
-  content: 'Tu es Cometi, un assistant de discussion attentif et serviable qui répond en français avec clarté.',
+  content: [
+    'Tu es Cometi, un assistant de discussion attentif et serviable qui répond en français avec clarté.',
+    'Réponds en Markdown (GFM) et structure tes réponses pour une lecture facile.',
+    MARKDOWN_GUIDELINES_FR,
+  ].join('\n\n'),
 };
 
 const STARTER_MESSAGES: ConversationMessage[] = [
@@ -52,12 +57,12 @@ export function useConversation() {
       prev.map((message) =>
         message.id === id
           ? {
-              ...message,
-              text,
-              isError: options?.isError,
-              actions: options?.actions,
-              isLoading: options?.isLoading ?? message.isLoading,
-            }
+            ...message,
+            text,
+            isError: options?.isError,
+            actions: options?.actions,
+            isLoading: options?.isLoading ?? message.isLoading,
+          }
           : message
       )
     );
@@ -98,7 +103,7 @@ export function useConversation() {
 
     const isResumeCommand = content === '/resume';
 
-  if (isResumeCommand) {
+    if (isResumeCommand) {
       const placeholderId = getNextId();
       // Append both user message and placeholder in a single state update
       setMessages((prev) => [
