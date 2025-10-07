@@ -17,18 +17,21 @@ export async function indexAndSelectTopChunks(
   const chunks = chunkText(paragraphs, 1200);
   if (chunks.length === 0) return paragraphs;
 
-  // 2) Upsert document and compute embeddings for chunks
+  // 2) Try to reuse existing chunks; if none, embed and store
   const { upsertDocument, upsertChunks, getDocumentChunks } = await import('../embeddings/store');
-  const doc = await upsertDocument(url, title);
-  const chunkEmbeddings = await embedTexts(chunks, env);
-  await upsertChunks(doc.id, chunks, chunkEmbeddings);
+  let stored = await getDocumentChunks(url);
+  if (stored.length === 0) {
+    const doc = await upsertDocument(url, title);
+    const chunkEmbeddings = await embedTexts(chunks, env);
+    await upsertChunks(doc.id, chunks, chunkEmbeddings);
+    stored = await getDocumentChunks(url);
+  }
 
   // 3) Compute query embedding for retrieval
   const query = process.env.RESUME_QUERY?.trim() || 'RESUME';
   const [queryEmbedding] = await embedTexts([query], env);
 
   // 4) Retrieve top K from DB (brute force in app for sqlite)
-  const stored = await getDocumentChunks(url);
   if (stored.length === 0) return paragraphs;
 
   // Cosine similarity against query

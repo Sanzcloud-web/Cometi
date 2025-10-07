@@ -113,3 +113,48 @@ export async function generateSummary(
     summary,
   };
 }
+
+export async function generateSummarySinglePass(
+  paragraphs: string[],
+  language: string,
+  url: string,
+  title: string,
+  env: ResumeServiceEnv
+): Promise<Omit<ResumeSummary, 'usedSources'>> {
+  const maxChars = Number(process.env.RESUME_MAX_CONTEXT_CHARS ?? 11000);
+  let combined = paragraphs.join('\n\n');
+  if (combined.length > maxChars) {
+    combined = combined.slice(0, maxChars);
+  }
+  console.log(`[resume] single-pass contextLen=${combined.length}`);
+
+  const messages = buildFinalSummaryPrompt(combined, language, url);
+  const raw = await requestCompletion(messages, env);
+  console.log(`[resume] single-pass response len=${raw.length}`);
+  const parsed = sanitizeJsonPayload(raw) as Partial<FinalSummaryPayload>;
+
+  if (!parsed || !Array.isArray(parsed.tldr) || typeof parsed.summary !== 'string') {
+    throw new Error('Le modèle a fourni une réponse JSON incomplète.');
+  }
+
+  const tldr = parsed.tldr
+    .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+    .filter((entry) => entry.length > 0)
+    .slice(0, 5);
+
+  if (tldr.length < 3) {
+    throw new Error('Le modèle a fourni trop peu de puces pour le TL;DR.');
+  }
+
+  const summary = parsed.summary.trim();
+  if (summary.length === 0) {
+    throw new Error('Le résumé long est vide.');
+  }
+
+  return {
+    url,
+    title,
+    tldr,
+    summary,
+  };
+}

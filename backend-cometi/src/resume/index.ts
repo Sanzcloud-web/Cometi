@@ -4,7 +4,7 @@ import { extractMainText } from './extractMainText';
 import { detectLanguage } from './utils/language';
 import { normalizeUrl, isHttpProtocol } from './utils/url';
 import type { ResumeRequestPayload, ResumeServiceEnv, ResumeSummary } from './types';
-import { generateSummary } from './summarize';
+import { generateSummary, generateSummarySinglePass } from './summarize';
 import { indexAndSelectTopChunks } from './retrieval';
 
 const NETWORK_TIMEOUT_MS = 12000;
@@ -120,7 +120,9 @@ export async function processResumeRequest(
     console.log(`[resume ${reqId}] selected top paragraphs=${paragraphs.length}`);
   }
 
-  const summary = await generateSummary(paragraphs, language, normalizedUrl, title, env);
+  const summary = process.env.DB_EMBEDDING
+    ? await generateSummarySinglePass(paragraphs, language, normalizedUrl, title, env)
+    : await generateSummary(paragraphs, language, normalizedUrl, title, env);
   console.log(`[resume ${reqId}] summary ready tldr=${summary.tldr.length} summaryLen=${summary.summary.length}`);
 
   const usedSources = [normalizedUrl, ...supplementalSources];
