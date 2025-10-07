@@ -16,6 +16,7 @@
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@tailwindcss/typography": "^0.5.15",
     "@types/chrome": "^0.0.248",
     "@types/markdown-it": "^14.1.2",
     "@types/react": "^18.2.24",

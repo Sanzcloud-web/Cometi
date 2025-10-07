@@ -19,6 +19,17 @@ function getRenderer(): MarkdownIt {
       return `<pre><code${cls}>${escaped}</code></pre>`;
     },
   });
+  // Secure links: open in new tab, no referrer
+  const defaultRender = md.renderer.rules.link_open || function(tokens, idx, options, env, self) {
+    return self.renderToken(tokens, idx, options);
+  };
+  md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
+    const aIndex = tokens[idx].attrIndex('target');
+    if (aIndex < 0) tokens[idx].attrPush(['target', '_blank']); else tokens[idx].attrs![aIndex][1] = '_blank';
+    const rIndex = tokens[idx].attrIndex('rel');
+    if (rIndex < 0) tokens[idx].attrPush(['rel', 'noreferrer']); else tokens[idx].attrs![rIndex][1] = 'noreferrer';
+    return defaultRender(tokens, idx, options, env, self);
+  };
   md.use(taskLists, { label: true, labelAfter: true, enabled: true });
   md.use(footnote);
   mdRenderer = md;

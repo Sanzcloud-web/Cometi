@@ -48,7 +48,15 @@ export function MessageItem({ message }: MessageItemProps): JSX.Element {
               </p>
             ) : (
               <div
-                className="prose prose-slate max-w-none prose-p:my-2 prose-ul:my-2 prose-li:my-0 text-[15px]"
+                className="prose prose-slate max-w-none text-[15px]
+                prose-h1:mt-0 prose-h1:mb-2 prose-h1:text-2xl
+                prose-h2:mt-3 prose-h2:mb-2 prose-h2:text-xl
+                prose-h3:mt-3 prose-h3:mb-2 prose-h3:text-lg
+                prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0
+                prose-a:text-blue-600 prose-a:no-underline hover:prose-a:underline
+                prose-code:bg-slate-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded
+                prose-pre:bg-slate-50 prose-pre:border prose-pre:border-slate-200 prose-pre:rounded
+                prose-img:rounded-md prose-table:my-3 prose-th:border prose-td:border prose-th:border-slate-200 prose-td:border-slate-200 prose-th:px-2 prose-th:py-1 prose-td:px-2 prose-td:py-1"
                 dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(message.text) }}
               />
             )
