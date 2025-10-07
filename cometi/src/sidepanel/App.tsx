@@ -2,7 +2,6 @@ import { useConversation } from './hooks/useConversation';
 import { ConversationThread } from './components/ConversationThread';
 import { Composer } from './components/Composer';
 import { ScrollArea } from './components/ui/scroll-area';
-import { Card } from './components/ui/card';
 
 export function App(): JSX.Element {
   const { messages, draft, setDraft, isLoading, handleSubmit } = useConversation();

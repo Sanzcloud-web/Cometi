@@ -1,8 +1,10 @@
 import type { FormEvent } from 'react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { PaperAirplaneIcon } from './icons';
+import { SlashCommandMenu, SlashCommand } from './SlashCommandMenu';
+import { SLASH_COMMANDS } from '../commands';
 
 type ComposerProps = {
   draft: string;
@@ -13,6 +15,8 @@ type ComposerProps = {
 
 export function Composer({ draft, onDraftChange, onSubmit, isSubmitting }: ComposerProps): JSX.Element {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [isSlashOpen, setIsSlashOpen] = useState(false);
+  const [slashActiveIndex, setSlashActiveIndex] = useState(0);
 
   const adjustTextareaSize = (textarea: HTMLTextAreaElement) => {
     const MAX_HEIGHT = 192; // ~12rem
@@ -28,6 +32,38 @@ export function Composer({ draft, onDraftChange, onSubmit, isSubmitting }: Compo
     }
   }, [draft]);
 
+  const currentValue = draft;
+  const isSlashContext = currentValue.startsWith('/');
+  const slashToken = (() => {
+    if (!isSlashContext) return '';
+    const withoutSlash = currentValue.slice(1);
+    const end = withoutSlash.search(/\s|\n/);
+    return (end === -1 ? withoutSlash : withoutSlash.slice(0, end)).trim();
+  })();
+  const slashItems: SlashCommand[] = SLASH_COMMANDS.filter((c) => {
+    const q = slashToken.toLowerCase();
+    if (!q) return true;
+    return c.label.toLowerCase().includes(q) || c.value.toLowerCase().includes(q);
+  });
+
+  useEffect(() => {
+    setIsSlashOpen(isSlashContext);
+    setSlashActiveIndex(0);
+  }, [isSlashContext, slashToken]);
+
+  const applySlashSelection = (cmd: SlashCommand, submit?: boolean) => {
+    const next = cmd.value;
+    onDraftChange(next);
+    setIsSlashOpen(false);
+    // Restore focus and optionally submit
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      if (submit) {
+        textareaRef.current?.form?.requestSubmit();
+      }
+    });
+  };
+
   return (
     <form
       onSubmit={onSubmit}
@@ -37,8 +73,11 @@ export function Composer({ draft, onDraftChange, onSubmit, isSubmitting }: Compo
         ref={textareaRef}
         value={draft}
         onChange={(event) => {
-          onDraftChange(event.target.value);
+          const next = event.target.value;
+          onDraftChange(next);
           adjustTextareaSize(event.currentTarget);
+          // toggle slash menu based on new content
+          setIsSlashOpen(next.startsWith('/'));
         }}
         rows={1}
         placeholder="Écrire un message…"
@@ -46,6 +85,40 @@ export function Composer({ draft, onDraftChange, onSubmit, isSubmitting }: Compo
         className="max-h-64 flex-1 leading-relaxed"
         disabled={isSubmitting}
         onKeyDown={(event) => {
+          if (isSlashOpen) {
+            // navigation for slash menu
+            if (event.key === 'ArrowDown') {
+              event.preventDefault();
+              setSlashActiveIndex((idx) => (slashItems.length ? (idx + 1) % slashItems.length : 0));
+              return;
+            }
+            if (event.key === 'ArrowUp') {
+              event.preventDefault();
+              setSlashActiveIndex((idx) => (slashItems.length ? (idx - 1 + slashItems.length) % slashItems.length : 0));
+              return;
+            }
+            if (event.key === 'Tab') {
+              event.preventDefault();
+              if (slashItems.length) applySlashSelection(slashItems[slashActiveIndex], false);
+              return;
+            }
+            if (event.key === 'Enter' && !event.shiftKey) {
+              if (slashItems.length) {
+                event.preventDefault();
+                applySlashSelection(slashItems[slashActiveIndex], true);
+                return;
+              }
+              // no items -> close and let normal enter handling run below
+              setIsSlashOpen(false);
+              // do not return; fall through to normal submit handler
+            }
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              setIsSlashOpen(false);
+              return;
+            }
+          }
+
           if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault();
             if (!isSubmitting && event.currentTarget.value.trim().length > 0) {
@@ -54,6 +127,15 @@ export function Composer({ draft, onDraftChange, onSubmit, isSubmitting }: Compo
           }
         }}
         style={{ overflowY: 'hidden' }}
+      />
+      <SlashCommandMenu
+        open={isSlashOpen}
+        items={slashItems}
+        activeIndex={slashActiveIndex}
+        onActiveIndexChange={setSlashActiveIndex}
+        anchor={textareaRef.current}
+        onClose={() => setIsSlashOpen(false)}
+        onSelect={(cmd) => applySlashSelection(cmd, true)}
       />
       <Button
         type="submit"
