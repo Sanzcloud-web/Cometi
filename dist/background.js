@@ -1,1 +1,0 @@
-chrome.runtime.onInstalled.addListener(async()=>{try{await chrome.sidePanel.setOptions({path:"sidepanel.html"}),await chrome.sidePanel.setPanelBehavior({openPanelOnActionClick:!0})}catch(e){console.error("Erreur lors de la configuration du panneau latéral :",e)}});
