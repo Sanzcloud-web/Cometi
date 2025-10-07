@@ -20,13 +20,21 @@ export function Composer({ draft, onDraftChange, onSubmit, isSubmitting }: Compo
 
   const adjustTextareaSize = (textarea: HTMLTextAreaElement) => {
     const MAX_HEIGHT = 192; // ~12rem
+    const BASE_HEIGHT = 44; // 2.75rem, align with min-h in Textarea
+    // For empty input, force baseline height to avoid initial oversize
+    if (textarea.value.trim().length === 0) {
+      textarea.style.height = `${BASE_HEIGHT}px`;
+      textarea.style.overflowY = 'hidden';
+      return;
+    }
+    // Measure natural content height
     textarea.style.height = 'auto';
-    const nextHeight = Math.min(textarea.scrollHeight, MAX_HEIGHT);
+    const nextHeight = Math.min(Math.max(textarea.scrollHeight, BASE_HEIGHT), MAX_HEIGHT);
     textarea.style.height = `${nextHeight}px`;
     textarea.style.overflowY = textarea.scrollHeight > nextHeight ? 'auto' : 'hidden';
   };
 
-  // Measure before paint to avoid initial oversize flicker
+  // Measure before paint to avoid flicker
   useLayoutEffect(() => {
     if (textareaRef.current) {
       adjustTextareaSize(textareaRef.current);
