@@ -44,7 +44,13 @@ export async function loadChat(chatId: string): Promise<{ id: string; title: str
     title: data.title,
     messages: data.messages
       .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .filter((m) => {
+        const t = (m.content ?? '').trim();
+        // Ne montre pas les sentinelles du routeur
+        if (/^<\s*NO_PAGE_CONTEXT\s*\/>$/i.test(t)) return false;
+        if (/^<\s*USE_PAGE_CONTEXT\s*\/>$/i.test(t)) return false;
+        return true;
+      })
       .map((m) => ({ id: m.id, role: m.role as any, text: m.content, createdAt: m.createdAt })),
   };
 }
-

@@ -10,9 +10,9 @@ type Props = {
 
 export function HistorySidebar({ isOpen, chats, onSelect, onClose }: Props): JSX.Element {
   return (
-    <div className={`transition-all duration-200 ${isOpen ? 'w-64' : 'w-0'} overflow-hidden border-r border-neutral-200/40 dark:border-neutral-800/60`}> 
+    <div className={`transition-all duration-200 ${isOpen ? 'w-64' : 'w-0'} overflow-hidden bg-[#ECECEC] rounded-xl`}> 
       <div className="h-full flex flex-col">
-        <div className="flex items-center justify-between px-3 py-2 border-b border-neutral-200/40 dark:border-neutral-800/60">
+        <div className="flex items-center justify-between px-3 py-2 ">
           <div className="text-sm font-medium opacity-80">Historique</div>
           <Button variant="ghost" onClick={onClose} className="h-7 px-2 text-xs">Fermer</Button>
         </div>
@@ -29,9 +29,13 @@ export function HistorySidebar({ isOpen, chats, onSelect, onClose }: Props): JSX
                     title={c.title ?? ''}
                   >
                     <div className="text-sm truncate">{c.title || 'Sans titre'}</div>
-                    {c.lastMessagePreview && (
-                      <div className="text-[11px] opacity-60 truncate">{c.lastMessagePreview}</div>
-                    )}
+                    {(() => {
+                      const p = (c.lastMessagePreview ?? '').trim();
+                      const isSentinel = /^<\s*(NO_PAGE_CONTEXT|USE_PAGE_CONTEXT)\s*\/>$/i.test(p);
+                      return !isSentinel && p.length > 0 ? (
+                        <div className="text-[11px] opacity-60 truncate">{p}</div>
+                      ) : null;
+                    })()}
                   </button>
                 </li>
               ))}
@@ -42,4 +46,3 @@ export function HistorySidebar({ isOpen, chats, onSelect, onClose }: Props): JSX
     </div>
   );
 }
-

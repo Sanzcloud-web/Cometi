@@ -5,7 +5,7 @@ type ResumeCommandContext = {
 };
 
 type ResumeStreamCallbacks = {
-  onProgress?: (e: { stage: string; [k: string]: unknown }) => void;
+  onProgress?: (e: { stage?: string; text?: string; [k: string]: unknown }) => void;
   onDelta?: (delta: string) => void;
 };
 

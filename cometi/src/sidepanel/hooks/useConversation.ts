@@ -262,7 +262,8 @@ export function useConversation() {
             content:
               `Tu es un routeur. Page courante: ${pageUrl}. Si la question a besoin du CONTENU de cette page pour répondre précisément (ou si la requête y fait implicitement référence), réponds UNIQUEMENT par <USE_PAGE_CONTEXT/>. Sinon réponds UNIQUEMENT par <NO_PAGE_CONTEXT/>.`,
           };
-        const decision = await requestChatCompletion([routerSystem, { role: 'user', content }], { chatId });
+        // Appel de routage interne: ne PAS persister dans l'historique
+        const decision = await requestChatCompletion([routerSystem, { role: 'user', content }]);
         usePage = /<USE_PAGE_CONTEXT\/>/i.test(decision);
       }
 
