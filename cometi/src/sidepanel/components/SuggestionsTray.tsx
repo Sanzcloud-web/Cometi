@@ -26,8 +26,9 @@ export function SuggestionsTray({
   onSelect,
   onRetry,
 }: SuggestionsTrayProps): JSX.Element | null {
-  const showPlaceholder = isLoading && suggestions.length === 0;
-  const hasContent = showPlaceholder || suggestions.length > 0 || Boolean(error);
+  const isBusy = isLoading || Boolean(isRefreshing);
+  const placeholderCount = suggestions.length > 0 ? suggestions.length : PLACEHOLDER_ITEMS.length;
+  const hasContent = isBusy || suggestions.length > 0 || Boolean(error);
 
   if (!hasContent) {
     return null;
@@ -39,31 +40,25 @@ export function SuggestionsTray({
       aria-live="polite"
       aria-busy={isLoading || isRefreshing}
     >
-      {suggestions.map((suggestion) => (
-        <button
-          key={suggestion.id}
-          type="button"
-          onClick={() => onSelect(suggestion)}
-          className={CHIP_CLASS}
-          aria-label={`Exécuter la suggestion « ${suggestion.label} »`}
-        >
-          {suggestion.label}
-        </button>
-      ))}
-
-      {showPlaceholder
-        ? PLACEHOLDER_ITEMS.map((_, index) => (
+      {isBusy
+        ? Array.from({ length: placeholderCount }).map((_, index) => (
             <span
               key={`placeholder-${index}`}
               className="h-8 w-32 animate-pulse rounded-full bg-slate-100"
               aria-hidden
             />
           ))
-        : null}
-
-      {isRefreshing && suggestions.length > 0 ? (
-        <span className="text-xs font-medium text-slate-400">Actualisation…</span>
-      ) : null}
+        : suggestions.map((suggestion) => (
+            <button
+              key={suggestion.id}
+              type="button"
+              onClick={() => onSelect(suggestion)}
+              className={CHIP_CLASS}
+              aria-label={`Exécuter la suggestion « ${suggestion.label} »`}
+            >
+              {suggestion.label}
+            </button>
+          ))}
 
       {Boolean(error) ? (
         <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
