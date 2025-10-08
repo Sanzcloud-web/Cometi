@@ -177,3 +177,39 @@ Quand `chatId` est fourni, le dernier message utilisateur et la réponse de l’
 
 - **Erreurs** :
   - Statut 500 si la clé API est absente ou si la réponse OpenAI n’est pas exploitable.
+
+### `POST /api/classify-fields`
+
+- Classe des champs DOM en `origin` (départ), `destination` (arrivée) et `waypoints`.
+- Fallback heuristique si LLM indisponible.
+
+- Corps:
+
+```
+{
+  "items": [
+    {
+      "id": "field1",
+      "placeholder": "From",
+      "labelNearby": "Départ",
+      "aria": ["search"],
+      "parentText": "A",
+      "x": 100,
+      "y": 80
+    }
+  ],
+  "language": "fr"
+}
+```
+
+- Réponse:
+
+```
+{
+  "origin": "field1",
+  "destination": "field2",
+  "waypoints": ["field3"],
+  "confidence": 0.7,
+  "used": "llm" // ou "heuristic"
+}
+```

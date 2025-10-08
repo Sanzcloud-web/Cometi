@@ -5,6 +5,7 @@ import { requestPageAnswerStream, requestResumeContext } from '../services/pageA
 import type { ChromeChatMessage, ConversationMessage, MessageAction } from '../types/chat';
 import { MARKDOWN_GUIDELINES_FR } from '../../shared/markdownGuidelines';
 import { createChat as apiCreateChat, listChats as apiListChats, loadChat as apiLoadChat, type ChatSummary } from '../services/historyClient';
+import { computeFastestRouteViaBackground } from '../services/routeAgent';
 
 const SYSTEM_PROMPT: ChromeChatMessage = {
   role: 'system',
@@ -12,6 +13,12 @@ const SYSTEM_PROMPT: ChromeChatMessage = {
     'Tu es Cometi, un assistant de discussion attentif et serviable qui répond en français avec clarté.',
     'Réponds en Markdown (GFM) et structure tes réponses pour une lecture facile.',
     MARKDOWN_GUIDELINES_FR,
+    // Tool instructions for autonomous route computation on GPS sites
+    'Tu peux, si nécessaire, calculer un itinéraire le plus rapide sur une page de cartographie/itinéraire ouverte (ex.: Google Maps) en émettant UNIQUEMENT une commande balisée, sans texte superflu:',
+    '  <ROUTE origin="..." destination="..." options="..."/>',
+    '- Utilise cette commande seulement si la question de l’utilisateur concerne un trajet (ex. "trajet le plus rapide entre X et Y").',
+    '- Remplis origin/destination à partir du message de l’utilisateur; les options (par ex. éviter péages/autoroutes, via=...) proviennent aussi du message.',
+    '- N’ajoute aucun autre texte si tu émets la balise; le résultat sera exécuté et tu formateras ensuite la réponse.',
   ].join('\n\n'),
 };
 
@@ -149,6 +156,18 @@ export function useConversation() {
   }, []);
 
   // No JSON formatting; we stream and render plain text directly.
+
+  function parseRouteCommand(text: string): { origin?: string; destination?: string; options?: string } | null {
+    const m = text.match(/<ROUTE\b([^>]*)\/>/i);
+    if (!m) return null;
+    const attrs = m[1] ?? '';
+    const getAttr = (name: string) => {
+      const re = new RegExp(name + '\\s*=\\s*"([^"]*)"', 'i');
+      const mm = attrs.match(re);
+      return mm ? mm[1].trim() : undefined;
+    };
+    return { origin: getAttr('origin'), destination: getAttr('destination'), options: getAttr('options') };
+  }
 
   const requestAssistantReply = async (history: ConversationMessage[], onStream?: (delta: string) => void) => {
     const payloadMessages: ChromeChatMessage[] = [
@@ -305,8 +324,40 @@ export function useConversation() {
 
         let acc = '';
         let first = true;
+        let routeHandled = false;
         await requestAssistantReply([...messages, userMessage], (delta) => {
+          if (routeHandled) return; // ignore further delta if route already processed
           acc += delta;
+          // Detect command tag
+          const cmd = parseRouteCommand(acc);
+          if (cmd && cmd.origin && cmd.destination) {
+            routeHandled = true;
+            (async () => {
+              try {
+                updateAssistantMessage(placeholderId, 'Calcul de l\'itinéraire…', { isLoading: true });
+                const res = await computeFastestRouteViaBackground({ origin: cmd.origin!, destination: cmd.destination!, language: 'fr' });
+                const best = res.best;
+                if (!best) {
+                  updateAssistantMessage(placeholderId, 'Impossible de trouver un trajet.', { isError: true });
+                  return;
+                }
+                const alts = res.routes.slice(1, 3);
+                const lines: string[] = [];
+                lines.push(`Itinéraire recommandé: **${best.durationMin} min**${typeof best.distanceKm === 'number' ? ` (${best.distanceKm} km)` : ''}.`);
+                if (alts.length) {
+                  lines.push('Alternatives:');
+                  for (const a of alts) {
+                    lines.push(`- ${a.durationMin} min${typeof a.distanceKm === 'number' ? ` (${a.distanceKm} km)` : ''}`);
+                  }
+                }
+                updateAssistantMessage(placeholderId, lines.join('\n'));
+              } catch (err: unknown) {
+                const msg = err instanceof Error ? err.message : 'Échec du calcul de trajet.';
+                updateAssistantMessage(placeholderId, msg, { isError: true });
+              }
+            })();
+            return;
+          }
           if (first) {
             first = false;
             updateAssistantMessage(placeholderId, acc, { isLoading: false });
@@ -314,7 +365,9 @@ export function useConversation() {
             updateAssistantMessage(placeholderId, acc);
           }
         }).then((finalText) => {
-          updateAssistantMessage(placeholderId, finalText);
+          if (!routeHandled) {
+            updateAssistantMessage(placeholderId, finalText);
+          }
         });
         void refreshChats();
       } catch (error: unknown) {

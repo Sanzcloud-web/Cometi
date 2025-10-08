@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { URL } from 'node:url';
 import { processChatRequest, type ChatPayload } from './chat-service';
+import { classifyFields, type ClassifyPayload } from './classify-service';
 import { createChat, getChatWithMessages, listChats, appendAssistantMessage, appendUserMessage } from './history';
 import { processSuggestionRequest, type SuggestionPayload } from './suggestions-service';
 import { processResumeRequest, type ResumeRequestPayload } from './resume';
@@ -74,6 +75,58 @@ const server = createServer(async (req, res) => {
       });
 
       sendJson(res, result.status, result.body);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erreur serveur inattendue.';
+      sendJson(res, 500, { error: message });
+    }
+    return;
+  }
+
+  if (url.pathname === '/api/log') {
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { error: 'Méthode non autorisée.' });
+      return;
+    }
+    try {
+      const raw = await readBody(req);
+      const payload = raw.length > 0 ? (JSON.parse(raw) as any) : undefined;
+      const scope = typeof payload?.scope === 'string' ? payload.scope : 'client';
+      const level = typeof payload?.level === 'string' ? payload.level : 'info';
+      const message = typeof payload?.message === 'string' ? payload.message : '';
+      const data = payload?.data;
+      const prefix = `[log][${scope}][${level}]`;
+      if (level === 'error') {
+        console.error(prefix, message, data ?? '');
+      } else if (level === 'warn') {
+        console.warn(prefix, message, data ?? '');
+      } else {
+        console.log(prefix, message, data ?? '');
+      }
+      sendJson(res, 200, { ok: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erreur serveur inattendue.';
+      sendJson(res, 500, { error: message });
+    }
+    return;
+  }
+
+  if (url.pathname === '/api/classify-fields') {
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { error: 'Méthode non autorisée.' });
+      return;
+    }
+    try {
+      const rawBody = await readBody(req);
+      const payload = rawBody.length > 0 ? (JSON.parse(rawBody) as ClassifyPayload) : undefined;
+      if (!payload || !Array.isArray(payload.items)) {
+        sendJson(res, 400, { error: 'Requête invalide: items manquants.' });
+        return;
+      }
+      const result = await classifyFields(payload, {
+        apiKey: process.env.OPENAI_API_KEY,
+        model: process.env.OPENAI_MODEL ?? 'gpt-4o-mini',
+      });
+      sendJson(res, 200, result);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Erreur serveur inattendue.';
       sendJson(res, 500, { error: message });
