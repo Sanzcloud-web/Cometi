@@ -5,6 +5,7 @@ export type ChatMessage = {
 
 export type ChatPayload = {
   messages: ChatMessage[];
+  chatId?: string;
 };
 
 export type ChatServiceEnv = {
@@ -61,7 +62,7 @@ export async function processChatRequest(
   }
 
   const totalLen = payload.messages.reduce((n, m) => n + (m.content?.length ?? 0), 0);
-  console.log(`[chat] model=${model} messages=${payload.messages.length} totalLen=${totalLen}`);
+  console.log(`[chat] model=${model} messages=${payload.messages.length} totalLen=${totalLen} chatId=${payload.chatId ?? '<none>'}`);
 
   const response = await fetch(OPENAI_ENDPOINT, {
     method: 'POST',
@@ -94,6 +95,21 @@ export async function processChatRequest(
       status: 500,
       body: { error: 'OpenAI a renvoyé une réponse vide.' },
     };
+  }
+
+  // Persist to history when chatId is provided
+  if (payload.chatId) {
+    try {
+      const { appendAssistantMessage, appendUserMessage } = await import('./history');
+      // Persist last user message if present
+      const lastUser = [...payload.messages].reverse().find((m) => m.role === 'user');
+      if (lastUser?.content) {
+        await appendUserMessage(payload.chatId, lastUser.content);
+      }
+      await appendAssistantMessage(payload.chatId, content);
+    } catch (e) {
+      console.warn('[chat] persist failed:', e);
+    }
   }
 
   return {

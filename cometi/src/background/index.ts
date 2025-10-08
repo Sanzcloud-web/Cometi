@@ -61,8 +61,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return undefined;
 });
 
-async function handleChatCompletion(message: { payload: { messages: ChatCompletionMessage[] } }): Promise<string> {
-  return createChatCompletion(message.payload.messages);
+async function handleChatCompletion(message: { payload: { messages: ChatCompletionMessage[]; chatId?: string } }): Promise<string> {
+  return createChatCompletion(message.payload.messages, { chatId: message.payload.chatId });
 }
 
 type PageContextPayload = {

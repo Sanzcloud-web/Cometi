@@ -7,6 +7,7 @@ export type ChatCompletionRequest = {
   type: 'chat:complete';
   payload: {
     messages: ChatCompletionMessage[];
+    chatId?: string;
   };
 };
 

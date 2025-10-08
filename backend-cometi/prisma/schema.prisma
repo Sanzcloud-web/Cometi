@@ -10,6 +10,34 @@ datasource embeddings {
   url      = env("DB_EMBEDDING")
 }
 
+// ===== Chat history models =====
+enum ChatRole {
+  user
+  assistant
+  system
+}
+
+model Chat {
+  id        String    @id @default(cuid())
+  title     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  messages  Message[]
+
+  @@index([updatedAt])
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  chatId    String
+  role      ChatRole
+  content   String
+  createdAt DateTime @default(now())
+
+  @@index([chatId, createdAt])
+}
+
 model Document {
   id        String   @id @default(cuid())
   url       String   @unique

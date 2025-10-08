@@ -3,7 +3,7 @@ import type { ChatCompletionMessage } from '../types';
 const API_BASE = (import.meta.env.VITE_COMETI_API_BASE ?? '').replace(/\/+$/, '');
 const API_URL = import.meta.env.VITE_COMETI_API_URL || (API_BASE ? `${API_BASE}/chat` : undefined);
 
-export async function createChatCompletion(messages: ChatCompletionMessage[]): Promise<string> {
+export async function createChatCompletion(messages: ChatCompletionMessage[], opts?: { chatId?: string }): Promise<string> {
   if (!API_URL) {
     throw new Error(
       "URL API absente. Ajoute VITE_COMETI_API_BASE (ex: http://localhost:3000/api) ou VITE_COMETI_API_URL dans ton fichier .env."
@@ -19,7 +19,7 @@ export async function createChatCompletion(messages: ChatCompletionMessage[]): P
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify({ messages, chatId: opts?.chatId }),
       signal: controller.signal,
     });
 

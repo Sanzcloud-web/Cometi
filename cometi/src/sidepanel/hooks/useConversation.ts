@@ -1,9 +1,10 @@
-import { FormEvent, useRef, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { requestChatCompletion, requestChatCompletionStream } from '../services/chatClient';
 import { requestResumeSummaryStream } from '../services/resumeStream';
 import { requestPageAnswerStream, requestResumeContext } from '../services/pageAnswerStream';
 import type { ChromeChatMessage, ConversationMessage, MessageAction } from '../types/chat';
 import { MARKDOWN_GUIDELINES_FR } from '../../shared/markdownGuidelines';
+import { createChat as apiCreateChat, listChats as apiListChats, loadChat as apiLoadChat, type ChatSummary } from '../services/historyClient';
 
 const SYSTEM_PROMPT: ChromeChatMessage = {
   role: 'system',
@@ -26,6 +27,9 @@ export function useConversation() {
   const [messages, setMessages] = useState<ConversationMessage[]>(STARTER_MESSAGES);
   const [draft, setDraft] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [chatId, setChatId] = useState<string | undefined>(undefined);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [chats, setChats] = useState<ChatSummary[]>([]);
   const idCounterRef = useRef(STARTER_MESSAGES.length - 1);
 
   const getNextId = () => {
@@ -69,6 +73,64 @@ export function useConversation() {
     );
   };
 
+  const refreshChats = async () => {
+    try {
+      const list = await apiListChats();
+      setChats(list);
+    } catch {
+      // ignore if backend not available
+    }
+  };
+
+  const createNewChat = async () => {
+    try {
+      const chat = await apiCreateChat();
+      setChatId(chat.id);
+      setMessages(STARTER_MESSAGES);
+      idCounterRef.current = STARTER_MESSAGES.length - 1;
+      await refreshChats();
+    } catch {
+      // Backend not available; keep in-memory only
+      setChatId(undefined);
+      setMessages(STARTER_MESSAGES);
+      idCounterRef.current = STARTER_MESSAGES.length - 1;
+    }
+  };
+
+  const openChat = async (id: string) => {
+    try {
+      const data = await apiLoadChat(id);
+      setChatId(data.id);
+      // Convert loaded messages to ConversationMessage with incremental ids
+      const base: ConversationMessage[] = [];
+      let nextId = -1;
+      const push = (role: 'user' | 'assistant', text: string) => {
+        nextId += 1;
+        base.push({ id: nextId, role, text });
+      };
+      // Always start with our intro assistant message
+      nextId = 0;
+      const intro = STARTER_MESSAGES[0];
+      base.push({ ...intro });
+      for (const m of data.messages) {
+        if (m.role === 'user' || m.role === 'assistant') {
+          push(m.role, m.text);
+        }
+      }
+      setMessages(base);
+      idCounterRef.current = base.length - 1;
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    // On mount: create a new chat session
+    void createNewChat();
+    void refreshChats();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // No JSON formatting; we stream and render plain text directly.
 
   const requestAssistantReply = async (history: ConversationMessage[], onStream?: (delta: string) => void) => {
@@ -81,9 +143,9 @@ export function useConversation() {
     ];
 
     if (onStream) {
-      return requestChatCompletionStream(payloadMessages, onStream);
+      return requestChatCompletionStream(payloadMessages, onStream, { chatId });
     }
-    return requestChatCompletion(payloadMessages);
+    return requestChatCompletion(payloadMessages, { chatId });
   };
 
   const runPrompt = (rawContent: string, options?: { enforcePageContext?: boolean }) => {
@@ -200,9 +262,9 @@ export function useConversation() {
             content:
               `Tu es un routeur. Page courante: ${pageUrl}. Si la question a besoin du CONTENU de cette page pour répondre précisément (ou si la requête y fait implicitement référence), réponds UNIQUEMENT par <USE_PAGE_CONTEXT/>. Sinon réponds UNIQUEMENT par <NO_PAGE_CONTEXT/>.`,
           };
-          const decision = await requestChatCompletion([routerSystem, { role: 'user', content }]);
-          usePage = /<USE_PAGE_CONTEXT\/>/i.test(decision);
-        }
+        const decision = await requestChatCompletion([routerSystem, { role: 'user', content }], { chatId });
+        usePage = /<USE_PAGE_CONTEXT\/>/i.test(decision);
+      }
 
         if (usePage) {
           let acc = '';
@@ -239,6 +301,7 @@ export function useConversation() {
         }).then((finalText) => {
           updateAssistantMessage(placeholderId, finalText);
         });
+        void refreshChats();
       } catch (error: unknown) {
         const message =
           error instanceof Error
@@ -263,5 +326,11 @@ export function useConversation() {
     isLoading,
     handleSubmit,
     runPrompt,
+    chatId,
+    chats,
+    historyOpen,
+    setHistoryOpen,
+    createNewChat,
+    openChat,
   };
 }

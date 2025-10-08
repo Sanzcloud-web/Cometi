@@ -71,7 +71,8 @@ API serverless pour relayer les requêtes vers OpenAI. Conçu pour être déploy
     "messages": [
       { "role": "system", "content": "..." },
       { "role": "user", "content": "..." }
-    ]
+    ],
+    "chatId": "cuid-optional"
   }
   ```
 
@@ -84,6 +85,37 @@ API serverless pour relayer les requêtes vers OpenAI. Conçu pour être déploy
 - **Erreurs** :
   - Statut 400 si la requête est mal formée.
   - Statut 500 si la clé est absente ou si OpenAI renvoie une erreur.
+
+Quand `chatId` est fourni, le dernier message utilisateur et la réponse de l’assistant sont ajoutés à l’historique.
+
+### `POST /api/chat-stream`
+
+- Identique à `/api/chat` mais renvoie un flux SSE (`event: delta` + `event: done`).
+- Accepte aussi un `chatId` pour la persistance à la fin du flux.
+
+### `GET /api/chats`
+
+- Liste des chats (ordre décroissant de `updatedAt`).
+
+  ```json
+  { "chats": [ { "id": "...", "title": "...", "updatedAt": "..." } ] }
+  ```
+
+### `POST /api/chats`
+
+- Crée un nouveau chat et renvoie l’objet créé.
+
+  ```json
+  { "chat": { "id": "...", "title": null, "createdAt": "...", "updatedAt": "..." } }
+  ```
+
+### `GET /api/chats/:id`
+
+- Renvoie un chat et ses messages.
+
+  ```json
+  { "id": "...", "title": "...", "messages": [ { "role": "user", "content": "..." } ] }
+  ```
 
 ### `POST /api/resume`
 

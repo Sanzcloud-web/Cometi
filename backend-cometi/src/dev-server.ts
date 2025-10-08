@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { URL } from 'node:url';
 import { processChatRequest, type ChatPayload } from './chat-service';
+import { createChat, getChatWithMessages, listChats, appendAssistantMessage, appendUserMessage } from './history';
 import { processSuggestionRequest, type SuggestionPayload } from './suggestions-service';
 import { processResumeRequest, type ResumeRequestPayload } from './resume';
 import { fetchPageContent } from './resume/network/fetchPageContent';
@@ -19,7 +20,7 @@ const ORIGIN = process.env.ORIGIN ?? '*';
 
 function applyCorsHeaders(res: ServerResponse) {
   res.setHeader('Access-Control-Allow-Origin', ORIGIN);
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 }
 
@@ -75,6 +76,58 @@ const server = createServer(async (req, res) => {
       sendJson(res, result.status, result.body);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Erreur serveur inattendue.';
+      sendJson(res, 500, { error: message });
+    }
+    return;
+  }
+
+  // Chat history endpoints
+  if (url.pathname === '/api/chats') {
+    if (req.method === 'GET') {
+      try {
+        const chats = await listChats();
+        sendJson(res, 200, { chats });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Erreur lors de la récupération des chats.';
+        sendJson(res, 500, { error: message });
+      }
+      return;
+    }
+    if (req.method === 'POST') {
+      try {
+        const rawBody = await readBody(req);
+        const payload = rawBody.length > 0 ? (JSON.parse(rawBody) as { title?: string }) : undefined;
+        const chat = await createChat(payload?.title);
+        sendJson(res, 200, { chat });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Erreur lors de la création du chat.';
+        sendJson(res, 500, { error: message });
+      }
+      return;
+    }
+    sendJson(res, 405, { error: 'Méthode non autorisée.' });
+    return;
+  }
+
+  if (url.pathname.startsWith('/api/chats/')) {
+    const id = url.pathname.replace('/api/chats/', '');
+    if (!id) {
+      sendJson(res, 400, { error: 'Identifiant de chat manquant.' });
+      return;
+    }
+    if (req.method !== 'GET') {
+      sendJson(res, 405, { error: 'Méthode non autorisée.' });
+      return;
+    }
+    try {
+      const chat = await getChatWithMessages(id);
+      if (!chat) {
+        sendJson(res, 404, { error: 'Chat introuvable.' });
+        return;
+      }
+      sendJson(res, 200, chat);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erreur lors du chargement du chat.';
       sendJson(res, 500, { error: message });
     }
     return;
@@ -149,6 +202,7 @@ const server = createServer(async (req, res) => {
       }
 
       const decoder = new TextDecoder('utf-8');
+      let full = '';
       let buffer = '';
       for await (const chunk of upstream.body as any) {
         buffer += decoder.decode(chunk, { stream: true });
@@ -161,15 +215,42 @@ const server = createServer(async (req, res) => {
             if (!l.startsWith('data:')) continue;
             const payload = l.replace(/^data:\s?/, '');
             if (payload === '[DONE]') {
+              // Persist assistant message if chatId provided
+              try {
+                if (full.trim().length > 0 && (payload as any)) {
+                  // no-op
+                }
+              } catch {}
               res.write(`event: done\n`);
               res.write(`data: {}\n\n`);
               res.end();
+              // After ending stream, persist messages asynchronously
+              (async () => {
+                try {
+                  if (payload && typeof (payload as any) === 'object') {
+                    /* noop */
+                  }
+                  const p = (rawBody.length > 0 ? (JSON.parse(rawBody) as ChatPayload) : undefined);
+                  if (p?.chatId) {
+                    const lastUser = [...(p.messages ?? [])].reverse().find((m) => m.role === 'user');
+                    if (lastUser?.content) {
+                      await appendUserMessage(p.chatId, lastUser.content);
+                    }
+                    if (full.trim().length > 0) {
+                      await appendAssistantMessage(p.chatId, full);
+                    }
+                  }
+                } catch (e) {
+                  console.warn('[chat-stream] persist failed:', e);
+                }
+              })();
               return;
             }
             try {
               const json = JSON.parse(payload) as any;
               const delta: string | undefined = json.choices?.[0]?.delta?.content;
               if (typeof delta === 'string' && delta.length > 0) {
+                full += delta;
                 res.write(`event: delta\n`);
                 res.write(`data: ${JSON.stringify({ delta })}\n\n`);
               }
@@ -184,6 +265,21 @@ const server = createServer(async (req, res) => {
       res.write(`event: done\n`);
       res.write(`data: {}\n\n`);
       res.end();
+      // Persist as fallback if not done caught above
+      try {
+        const p = (rawBody.length > 0 ? (JSON.parse(rawBody) as ChatPayload) : undefined);
+        if (p?.chatId) {
+          const lastUser = [...(p.messages ?? [])].reverse().find((m) => m.role === 'user');
+          if (lastUser?.content) {
+            await appendUserMessage(p.chatId, lastUser.content);
+          }
+          if (full.trim().length > 0) {
+            await appendAssistantMessage(p.chatId, full);
+          }
+        }
+      } catch (e) {
+        console.warn('[chat-stream] persist failed (safety):', e);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Erreur serveur inattendue.';
       res.write(`event: error\n`);

@@ -14,6 +14,7 @@ Front-end de l’extension Chrome qui s’appuie sur le backend Vercel (`backend
    - Local: `http://localhost:3000/api` (backend lancé avec `npm run dev` dans `backend-cometi`).
    - Production: `https://<projet>.vercel.app/api`.
    L’extension construira automatiquement `.../chat` et `.../resume`.
+   Avec cette URL, l’historique est activé: un nouveau chat est créé à l’ouverture du panneau et tu peux afficher/masquer l’historique, ouvrir un ancien chat, ou démarrer un "Nouveau chat".
 3. (Optionnel) Tu peux surcharger les URLs précises si besoin:
    - `VITE_COMETI_API_URL` pour `POST /api/chat`
    - `VITE_COMETI_RESUME_URL` pour `POST /api/resume`

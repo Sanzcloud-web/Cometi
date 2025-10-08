@@ -11,6 +11,7 @@ type BackgroundChatRequest = {
   type: 'chat:complete';
   payload: {
     messages: ChromeChatMessage[];
+    chatId?: string;
   };
 };
 
@@ -27,11 +28,11 @@ function isChromeRuntimeAvailable(): boolean {
   return typeof chrome !== 'undefined' && typeof chrome.runtime?.sendMessage === 'function';
 }
 
-async function sendViaChromeRuntime(messages: ChromeChatMessage[]): Promise<string> {
+async function sendViaChromeRuntime(messages: ChromeChatMessage[], opts?: { chatId?: string }): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const request: BackgroundChatRequest = {
       type: 'chat:complete',
-      payload: { messages },
+      payload: { messages, chatId: opts?.chatId },
     };
 
     chrome.runtime.sendMessage(request, (response?: BackgroundChatResponse) => {
@@ -60,7 +61,7 @@ async function sendViaChromeRuntime(messages: ChromeChatMessage[]): Promise<stri
   });
 }
 
-async function sendViaHttp(messages: ChromeChatMessage[]): Promise<string> {
+async function sendViaHttp(messages: ChromeChatMessage[], opts?: { chatId?: string }): Promise<string> {
   if (!API_URL) {
     throw new Error(
       "URL API absente. Ajoute VITE_COMETI_API_BASE (ex: http://localhost:3000/api) ou VITE_COMETI_API_URL dans ton fichier .env."
@@ -72,7 +73,7 @@ async function sendViaHttp(messages: ChromeChatMessage[]): Promise<string> {
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ messages, chatId: opts?.chatId }),
   });
 
   if (!response.ok) {
@@ -90,10 +91,10 @@ async function sendViaHttp(messages: ChromeChatMessage[]): Promise<string> {
   return data.message.trim();
 }
 
-export async function requestChatCompletion(messages: ChromeChatMessage[]): Promise<string> {
+export async function requestChatCompletion(messages: ChromeChatMessage[], opts?: { chatId?: string }): Promise<string> {
   if (isChromeRuntimeAvailable()) {
     try {
-      return await sendViaChromeRuntime(messages);
+      return await sendViaChromeRuntime(messages, opts);
     } catch (error) {
       if (!API_URL || !(error instanceof ChromeRuntimeTransportError)) {
         throw error;
@@ -102,17 +103,18 @@ export async function requestChatCompletion(messages: ChromeChatMessage[]): Prom
     }
   }
 
-  return sendViaHttp(messages);
+  return sendViaHttp(messages, opts);
 }
 
 export async function requestChatCompletionStream(
   messages: ChromeChatMessage[],
   onDelta: (chunk: string) => void
+  , opts?: { chatId?: string }
 ): Promise<string> {
   // Prefer streaming over HTTP when base URL available
   if (!STREAM_URL) {
     // Fall back to non-stream HTTP
-    const full = await sendViaHttp(messages);
+    const full = await sendViaHttp(messages, opts);
     onDelta(full);
     return full;
   }
@@ -120,7 +122,7 @@ export async function requestChatCompletionStream(
   const response = await fetch(STREAM_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ messages, chatId: opts?.chatId }),
   });
 
   if (!response.ok || !response.body) {
