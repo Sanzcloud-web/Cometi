@@ -27,6 +27,15 @@ export function useActivePageContext(): ActivePageContext {
 
   useEffect(() => {
     let cancelled = false;
+    // Detect Chrome runtime availability (avoid noisy errors outside extension)
+    let runtimeAvailable = false;
+    try {
+      runtimeAvailable = typeof chrome !== 'undefined' && typeof chrome.runtime?.sendMessage === 'function';
+    } catch {
+      runtimeAvailable = false;
+    }
+    // Throttle initial error logging to avoid console spam
+    let hasLoggedInitial = false;
 
     const applyContext = (payload?: { url?: string; title?: string }) => {
       if (cancelled) return;
@@ -49,20 +58,27 @@ export function useActivePageContext(): ActivePageContext {
     };
 
     const bootstrap = async () => {
+      // Skip initial query when runtime is not available (dev preview) to avoid warnings
+      if (!runtimeAvailable) return;
       try {
         const resumeContext = await requestResumeContext();
         applyContext({
           url: resumeContext.url,
           title: resumeContext.title ?? resumeContext.domSnapshot?.title,
         });
-      } catch (error) {
-        console.warn('[Cometi] Impossible de récupérer le contexte de page initial :', error);
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error ?? '');
+        const isBenign = /Impossible de déterminer l'onglet actif\.?/i.test(msg) || /Commande disponible uniquement dans Chrome/i.test(msg);
+        if (!hasLoggedInitial && !isBenign) {
+          hasLoggedInitial = true;
+          console.debug('[Cometi] Contexte page initial indisponible:', msg);
+        }
       }
     };
 
     void bootstrap();
 
-    if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
+    if (runtimeAvailable && chrome.runtime?.onMessage) {
       const listener: Parameters<typeof chrome.runtime.onMessage.addListener>[0] = (
         message: PageContextMessage
       ) => {
