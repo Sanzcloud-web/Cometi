@@ -17,6 +17,7 @@ Front-end de l’extension Chrome qui s’appuie sur le backend Vercel (`backend
 3. (Optionnel) Tu peux surcharger les URLs précises si besoin:
    - `VITE_COMETI_API_URL` pour `POST /api/chat`
    - `VITE_COMETI_RESUME_URL` pour `POST /api/resume`
+   - `VITE_COMETI_SUGGESTIONS_URL` pour `POST /api/suggestions`
 
 ## Développement
 

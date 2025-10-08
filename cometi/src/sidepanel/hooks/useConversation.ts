@@ -86,13 +86,13 @@ export function useConversation() {
     return requestChatCompletion(payloadMessages);
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const content = draft.trim();
+  const runPrompt = (rawContent: string, options?: { enforcePageContext?: boolean }) => {
+    const content = rawContent.trim();
     if (!content || isLoading) {
       return;
     }
 
+    const enforcePageContext = options?.enforcePageContext ?? false;
     const userMessage: ConversationMessage = {
       id: getNextId(),
       role: 'user',
@@ -102,11 +102,10 @@ export function useConversation() {
     setDraft('');
     setIsLoading(true);
 
-    const isResumeCommand = content === '/resume';
+    const isResumeCommand = content === '/resume' && !enforcePageContext;
 
     if (isResumeCommand) {
       const placeholderId = getNextId();
-      // Append both user message and placeholder in a single state update
       setMessages((prev) => [
         ...prev,
         userMessage,
@@ -119,9 +118,7 @@ export function useConversation() {
           let first = true;
           const normalizeMd = (s: string) =>
             s
-              // Ensure space after markdown headers like ##Title -> ## Title
               .replace(/(^|\n)(#{1,6})(\S)/g, (_m, p1, p2, p3) => `${p1}${p2} ${p3}`)
-              // Ensure dash-space for lists: -Item -> - Item
               .replace(/(^|\n)-(\S)/g, (_m, p1, p2) => `${p1}- ${p2}`);
           const summary = await requestResumeSummaryStream({
             onProgress: (e) => {
@@ -162,12 +159,33 @@ export function useConversation() {
       return;
     }
 
-    // Heuristic: ask the model-router if page context is needed
     setMessages((prev) => [...prev, userMessage]);
     const placeholderId = appendAssistantMessage('', { isLoading: true });
 
     void (async () => {
       try {
+        if (enforcePageContext) {
+          let acc = '';
+          const answer = await requestPageAnswerStream(content, {
+            onDelta: (delta) => {
+              acc += delta;
+              updateAssistantMessage(placeholderId, acc, { isLoading: false });
+            },
+            onProgress: (e) => {
+              const label = typeof (e as any)?.text === 'string'
+                ? (e as any).text
+                : typeof e?.stage === 'string'
+                  ? e.stage
+                  : undefined;
+              if (label) {
+                updateAssistantMessage(placeholderId, label, { isLoading: true });
+              }
+            },
+          });
+          updateAssistantMessage(placeholderId, answer);
+          return;
+        }
+
         const API_BASE = (import.meta.env.VITE_COMETI_API_BASE ?? '').replace(/\/+$/, '');
         const hasApi = API_BASE.length > 0;
         let usePage = false;
@@ -177,7 +195,6 @@ export function useConversation() {
             const ctx = await requestResumeContext();
             pageUrl = ctx.url;
           } catch { /* ignore */ }
-          // Router prompt: return only <USE_PAGE_CONTEXT/> or <NO_PAGE_CONTEXT/>
           const routerSystem: ChromeChatMessage = {
             role: 'system',
             content:
@@ -209,7 +226,6 @@ export function useConversation() {
           return;
         }
 
-        // Fallback: regular streaming chat
         let acc = '';
         let first = true;
         await requestAssistantReply([...messages, userMessage], (delta) => {
@@ -235,11 +251,17 @@ export function useConversation() {
     })();
   };
 
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    runPrompt(draft);
+  };
+
   return {
     messages,
     draft,
     setDraft,
     isLoading,
     handleSubmit,
+    runPrompt,
   };
 }
