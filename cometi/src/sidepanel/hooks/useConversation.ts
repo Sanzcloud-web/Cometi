@@ -342,15 +342,34 @@ export function useConversation() {
                   return;
                 }
                 const alts = res.routes.slice(1, 3);
-                const lines: string[] = [];
-                lines.push(`Itinéraire recommandé: **${best.durationMin} min**${typeof best.distanceKm === 'number' ? ` (${best.distanceKm} km)` : ''}.`);
-                if (alts.length) {
-                  lines.push('Alternatives:');
-                  for (const a of alts) {
-                    lines.push(`- ${a.durationMin} min${typeof a.distanceKm === 'number' ? ` (${a.distanceKm} km)` : ''}`);
+                // Stream a proper answer from the LLM using the computed results
+                const facts = [
+                  `Origine: ${cmd.origin}`,
+                  `Destination: ${cmd.destination}`,
+                  `Recommandé: ${best.durationMin} min${typeof best.distanceKm === 'number' ? ` (${best.distanceKm} km)` : ''}`,
+                  alts.length
+                    ? `Alternatives: ${alts.map((a) => `${a.durationMin} min${typeof a.distanceKm === 'number' ? ` (${a.distanceKm} km)` : ''}`).join(', ')}`
+                    : undefined,
+                ].filter(Boolean).join('\n');
+
+                const streamingMessages: ChromeChatMessage[] = [
+                  SYSTEM_PROMPT,
+                  { role: 'system', content: 'Voici des résultats d\'itinéraires extraits. Rédige une réponse claire en français qui explique le meilleur trajet et alternatives, de façon concise.' },
+                  { role: 'system', content: facts },
+                  { role: 'user', content },
+                ];
+
+                let out = '';
+                let firstChunk = true;
+                await requestChatCompletionStream(streamingMessages, (delta) => {
+                  out += delta;
+                  if (firstChunk) {
+                    firstChunk = false;
+                    updateAssistantMessage(placeholderId, out, { isLoading: false });
+                  } else {
+                    updateAssistantMessage(placeholderId, out);
                   }
-                }
-                updateAssistantMessage(placeholderId, lines.join('\n'));
+                });
               } catch (err: unknown) {
                 const msg = err instanceof Error ? err.message : 'Échec du calcul de trajet.';
                 updateAssistantMessage(placeholderId, msg, { isError: true });
