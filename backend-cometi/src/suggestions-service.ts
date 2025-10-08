@@ -4,6 +4,7 @@ const DEFAULT_MODEL = 'gpt-4.1-nano';
 export type SuggestionPayload = {
   domain?: string;
   context?: string;
+  snippet?: string;
   language?: 'fr' | 'en';
 };
 
@@ -114,6 +115,15 @@ function buildPrompt(payload: SuggestionPayload): { role: 'system' | 'user'; con
       language === 'fr'
         ? `Contexte: ${payload.context}`
         : `Context: ${payload.context}`
+    );
+  }
+  if (payload.snippet) {
+    const SNIPPET_MAX = 1200;
+    const snippet = payload.snippet.slice(0, SNIPPET_MAX);
+    siteDescriptionParts.push(
+      language === 'fr'
+        ? `Extrait de page (texte brut):\n${snippet}`
+        : `Page snippet (plain text):\n${snippet}`
     );
   }
 

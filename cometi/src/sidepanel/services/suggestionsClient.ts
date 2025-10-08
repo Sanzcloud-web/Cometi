@@ -87,6 +87,7 @@ function normalizeSuggestions(payload: SuggestionResponse): Suggestion[] {
 export async function requestSuggestions(payload: {
   domain?: string;
   context?: string;
+  snippet?: string;
   language?: 'fr' | 'en';
 }): Promise<Suggestion[]> {
   const response = await fetch(ensureSuggestionsUrl(), {

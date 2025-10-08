@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { requestSuggestions } from '../services/suggestionsClient';
 import type { Suggestion } from '../types/suggestions';
 import { useActivePageContext } from './useActivePageContext';
+import { requestResumeContext } from '../services/pageAnswerStream';
+import { extractTextSnippet } from '../utils/html';
 
 type SuggestionsState = {
   suggestions: Suggestion[];
@@ -54,7 +56,11 @@ export function useSuggestions() {
       return;
     }
 
-    const cachedEntry = cacheRef.current.get(targetDomain);
+    // Build a cache key that includes domain + a small part of context (title/url)
+    const contextLabel = (title && title.trim()) || url || undefined;
+    const normalizedContext = contextLabel?.trim() || undefined;
+    const cacheKey = `${targetDomain}|${(normalizedContext ?? '').slice(0, 120)}`;
+    const cachedEntry = cacheRef.current.get(cacheKey);
     const cachedSuggestions = cachedEntry?.suggestions ?? [];
     const hasCachedSuggestions = cachedSuggestions.length > 0;
     let cancelled = false;
@@ -69,16 +75,27 @@ export function useSuggestions() {
       });
 
       try {
-        const contextLabel = (title && title.trim()) || url || undefined;
-        const normalizedContext = contextLabel?.trim() || undefined;
+        // Retrieve a small text snippet of the current page DOM (if available)
+        let snippet: string | undefined = undefined;
+        try {
+          const ctx = await requestResumeContext();
+          const html = ctx.domSnapshot?.html;
+          if (html && html.trim().length > 0) {
+            snippet = extractTextSnippet(html, 1200);
+          }
+        } catch (_e) {
+          // Non-fatal: if DOM snapshot is unavailable, continue without snippet
+        }
+
         const suggestions = await requestSuggestions({
           domain: targetDomain,
           context: normalizedContext,
+          snippet,
           language: 'fr',
         });
 
         if (!cancelled && requestCounterRef.current === requestId) {
-          cacheRef.current.set(targetDomain, {
+          cacheRef.current.set(cacheKey, {
             suggestions,
             contextLabel: normalizedContext,
             fetchedAt: Date.now(),
