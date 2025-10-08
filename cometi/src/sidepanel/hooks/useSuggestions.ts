@@ -10,6 +10,11 @@ type SuggestionsState = {
   error?: string;
 };
 
+type CachedSuggestionsEntry = {
+  suggestions: Suggestion[];
+  contextLabel?: string;
+  fetchedAt: number;
+};
 const INITIAL_STATE: SuggestionsState = {
   suggestions: [],
   isLoading: true,
@@ -19,7 +24,7 @@ const INITIAL_STATE: SuggestionsState = {
 export function useSuggestions() {
   const [state, setState] = useState<SuggestionsState>(INITIAL_STATE);
   const [reloadToken, setReloadToken] = useState(0);
-  const cacheRef = useRef(new Map<string, Suggestion[]>());
+  const cacheRef = useRef(new Map<string, CachedSuggestionsEntry>());
   const requestCounterRef = useRef(0);
   const { domain, title, url } = useActivePageContext();
 
@@ -49,7 +54,8 @@ export function useSuggestions() {
       return;
     }
 
-    const cachedSuggestions = cacheRef.current.get(targetDomain) ?? [];
+    const cachedEntry = cacheRef.current.get(targetDomain);
+    const cachedSuggestions = cachedEntry?.suggestions ?? [];
     const hasCachedSuggestions = cachedSuggestions.length > 0;
     let cancelled = false;
     const requestId = ++requestCounterRef.current;
@@ -64,16 +70,25 @@ export function useSuggestions() {
 
       try {
         const contextLabel = (title && title.trim()) || url || undefined;
-        const suggestions = await requestSuggestions({ domain: targetDomain, context: contextLabel, language: 'fr' });
+        const normalizedContext = contextLabel?.trim() || undefined;
+        const suggestions = await requestSuggestions({
+          domain: targetDomain,
+          context: normalizedContext,
+          language: 'fr',
+        });
 
         if (!cancelled && requestCounterRef.current === requestId) {
-          cacheRef.current.set(targetDomain, suggestions);
+          cacheRef.current.set(targetDomain, {
+            suggestions,
+            contextLabel: normalizedContext,
+            fetchedAt: Date.now(),
+          });
           setState({ suggestions, isLoading: false, isRefreshing: false, error: undefined });
         }
       } catch (error) {
         if (!cancelled && requestCounterRef.current === requestId) {
           const message =
-            error instanceof Error ? error.message : 'Impossible de récupérer les suggestions disponibles.';
+            error instanceof Error ? error.message : "Impossible de récupérer les suggestions disponibles.";
           setState((prev) => ({
             suggestions: hasCachedSuggestions ? cachedSuggestions : prev.suggestions,
             isLoading: !hasCachedSuggestions,
@@ -102,4 +117,3 @@ export function useSuggestions() {
     [state.suggestions, state.isLoading, state.isRefreshing, state.error, refresh]
   );
 }
-

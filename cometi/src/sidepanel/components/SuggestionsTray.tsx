@@ -1,8 +1,14 @@
 import type { Suggestion } from '../types/suggestions';
+import { cx } from '../utils/cx';
 import { Button } from './ui/button';
 
 const PLACEHOLDER_ITEMS = Array.from({ length: 3 });
 
+const CHIP_CLASS = cx(
+  'rounded-full border border-slate-200 bg-slate-50 px-4 py-1.5 text-sm font-medium text-slate-700 transition',
+  'hover:border-slate-300 hover:bg-slate-100',
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 focus-visible:ring-offset-white'
+);
 type SuggestionsTrayProps = {
   suggestions: Suggestion[];
   isLoading: boolean;
@@ -28,13 +34,18 @@ export function SuggestionsTray({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div
+      className="flex flex-wrap items-center gap-2"
+      aria-live="polite"
+      aria-busy={isLoading || isRefreshing}
+    >
       {suggestions.map((suggestion) => (
         <button
           key={suggestion.id}
           type="button"
           onClick={() => onSelect(suggestion)}
-          className="rounded-full border border-slate-200 bg-slate-50 px-4 py-1.5 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-100"
+          className={CHIP_CLASS}
+          aria-label={`Exécuter la suggestion « ${suggestion.label} »`}
         >
           {suggestion.label}
         </button>
@@ -56,7 +67,7 @@ export function SuggestionsTray({
 
       {Boolean(error) ? (
         <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
-          <span>{error}</span>
+          <span role="status">{error}</span>
           {onRetry ? (
             <Button type="button" variant="ghost" onClick={onRetry} className="h-7 rounded-full px-3 text-xs">
               Réessayer

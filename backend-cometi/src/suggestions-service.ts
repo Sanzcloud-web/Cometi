@@ -25,23 +25,79 @@ export type SuggestionServiceResult = {
   };
 };
 
+const SUMMARY_KEYWORDS = [
+  'résum',
+  'synth',
+  'analyse',
+  'avis',
+  'opinion',
+  'argument',
+  'points clés',
+  'tendance',
+];
+
+const QUESTION_PREFIXES = ['comment', 'pourquoi', 'quel', 'quelle', 'quels', 'quelles', 'que ', 'quoi', 'qui'];
+
+const DEFAULT_SUMMARY_SUGGESTIONS: Suggestion[] = [
+  { id: 1, label: 'Résumé des points clés' },
+  { id: 2, label: 'Analyse du ton général' },
+  { id: 3, label: 'Avis principaux exprimés' },
+  { id: 4, label: 'Arguments récurrents' },
+  { id: 5, label: 'Questions ouvertes à explorer ?' },
+];
+
+function isSummaryOrQuestion(label: string): boolean {
+  const normalized = label.trim().toLowerCase();
+  if (!normalized) return false;
+  if (normalized.includes('?')) {
+    return true;
+  }
+  for (const keyword of SUMMARY_KEYWORDS) {
+    if (normalized.includes(keyword)) {
+      return true;
+    }
+  }
+  for (const prefix of QUESTION_PREFIXES) {
+    if (normalized.startsWith(prefix)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function normalizeSummaryLabels(items: Suggestion[]): Suggestion[] {
+  const filtered = items.filter((item) => isSummaryOrQuestion(item.label));
+  if (filtered.length === 0) {
+    return DEFAULT_SUMMARY_SUGGESTIONS.map((suggestion, index) => ({
+      id: index + 1,
+      label: suggestion.label,
+    }));
+  }
+
+  return filtered.slice(0, 5).map((suggestion, index) => ({
+    id: index + 1,
+    label: suggestion.label,
+  }));
+}
 function buildPrompt(payload: SuggestionPayload): { role: 'system' | 'user'; content: string }[] {
   const language = payload.language ?? 'fr';
   const intro =
     language === 'fr'
       ?
-        "Tu es un générateur de suggestions d'actions pour une extension de navigateur. " +
+        "Tu es un générateur de suggestions de résumés pour une extension de navigateur. " +
         'Tu dois toujours renvoyer un JSON strict conforme au schéma {"suggestions": [{"id": number, "label": string}]}. '
       :
-        'You generate action suggestions for a browser extension. ' +
+        'You generate summary suggestions for a browser extension. ' +
         'Always respond with strict JSON using the schema {"suggestions": [{"id": number, "label": string}]}. ';
 
   const tone =
     language === 'fr'
       ?
-        'Les labels doivent être de courtes commandes utiles (maximum 60 caractères), adaptées au site, et commencer par un verbe. '
+        "Les labels doivent proposer soit un résumé, soit une question d'analyse (max 70 caractères). " +
+        "N'indique jamais une action à réaliser (pas de suivre, cliquer, liker, etc.). "
       :
-        'Labels must be short actionable commands (max 60 characters) tailored to the site and start with a verb. ';
+        'Labels must offer either a summary or an analytical question (max 70 characters). ' +
+        'Never suggest a direct action (no follow, click, like, etc.). ';
 
   const systemMessage = `${intro}${tone}Numérote les suggestions de 1 à 5.`;
 
@@ -93,8 +149,9 @@ function parseSuggestions(raw: string | undefined): Suggestion[] | undefined {
         })
         .filter((item: Suggestion) => item.label.length > 0);
 
-      if (suggestions.length > 0) {
-        return suggestions;
+      const normalized = normalizeSummaryLabels(suggestions);
+      if (normalized.length > 0) {
+        return normalized;
       }
     }
   } catch (error) {

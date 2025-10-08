@@ -18,6 +18,45 @@ function ensureSuggestionsUrl(): string {
   return SUGGESTIONS_URL;
 }
 
+const SUMMARY_KEYWORDS = [
+  'résum',
+  'synth',
+  'analyse',
+  'avis',
+  'opinion',
+  'argument',
+  'points clés',
+  'tendance',
+];
+
+const QUESTION_PREFIXES = ['comment', 'pourquoi', 'quel', 'quelle', 'quels', 'quelles', 'que ', 'quoi', 'qui'];
+
+const DEFAULT_SUMMARY_SUGGESTIONS: Suggestion[] = [
+  { id: 1, label: 'Résumé des points clés' },
+  { id: 2, label: 'Analyse du ton général' },
+  { id: 3, label: 'Avis principaux exprimés' },
+  { id: 4, label: 'Arguments récurrents' },
+  { id: 5, label: 'Questions ouvertes à explorer ?' },
+];
+
+function isSummaryOrQuestion(label: string): boolean {
+  const normalized = label.trim().toLowerCase();
+  if (!normalized) return false;
+  if (normalized.includes('?')) {
+    return true;
+  }
+  for (const keyword of SUMMARY_KEYWORDS) {
+    if (normalized.includes(keyword)) {
+      return true;
+    }
+  }
+  for (const prefix of QUESTION_PREFIXES) {
+    if (normalized.startsWith(prefix)) {
+      return true;
+    }
+  }
+  return false;
+}
 function normalizeSuggestions(payload: SuggestionResponse): Suggestion[] {
   if (!payload || !Array.isArray(payload.suggestions)) {
     throw new Error('Réponse invalide du service de suggestions.');
@@ -32,7 +71,15 @@ function normalizeSuggestions(payload: SuggestionResponse): Suggestion[] {
       const id = typeof idValue === 'number' && Number.isInteger(idValue) ? idValue : index + 1;
       return { id, label };
     })
-    .filter((item): item is Suggestion => item !== null);
+    .filter((item): item is Suggestion => item !== null)
+    .filter((item) => isSummaryOrQuestion(item.label));
+
+  if (mapped.length === 0) {
+    return DEFAULT_SUMMARY_SUGGESTIONS.map((suggestion, index) => ({
+      id: index + 1,
+      label: suggestion.label,
+    }));
+  }
 
   return mapped;
 }
