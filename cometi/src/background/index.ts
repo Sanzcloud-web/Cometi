@@ -77,8 +77,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message?.type === 'route:compute') {
-    const { origin, destination, language, mode } = message.payload ?? {};
-    void computeFastestRoute({ origin, destination, language, mode })
+    const { origin, destination, language, mode, url } = message.payload ?? {};
+    void computeFastestRoute({ origin, destination, language, mode, url })
       .then((result) => sendResponse({ ok: true, result }))
       .catch((error: unknown) => {
         sendResponse({ ok: false, error: error instanceof Error ? error.message : 'Échec du calcul de trajet.' });
@@ -229,7 +229,7 @@ async function collectDomFields(): Promise<DomFieldFeature[]> {
   return result ?? [];
 }
 
-async function computeFastestRoute(payload: { origin: string; destination: string; language?: string; mode?: string }): Promise<{
+async function computeFastestRoute(payload: { origin: string; destination: string; language?: string; mode?: string; url?: string }): Promise<{
   best: { durationMin: number; distanceKm?: number; text?: string } | null;
   routes: { durationMin: number; distanceKm?: number; text?: string }[];
   pageUrl?: string;
@@ -242,6 +242,123 @@ async function computeFastestRoute(payload: { origin: string; destination: strin
     url: tab.url,
     mode: payload.mode ?? null,
   });
+
+  // 0) If a URL is provided by the LLM, navigate to it directly; else build from origin/destination/mode
+  const normalizeTravelMode = (raw?: string | null): string | null => {
+    if (!raw) return null;
+    const v = String(raw).toLowerCase();
+    if (/(velo|vélo|bike|cycl)/i.test(v)) return 'bicycling';
+    if (/(two|2).*-?wheeler|deux.?roues|scooter|moto/i.test(v)) return 'two-wheeler';
+    if (/(pied|walk|marche|foot)/i.test(v)) return 'walking';
+    if (/(train|metro|métro|rer|tram|bus|transit|transport)/i.test(v)) return 'transit';
+    if (/(drive|car|auto|voiture|condui)/i.test(v)) return 'driving';
+    return null;
+  };
+
+  {
+    const enc = (s: string) => encodeURIComponent(String(s ?? '').trim());
+    const travelModeParam = normalizeTravelMode(payload.mode ?? null);
+    const dirUrl = typeof payload.url === 'string' && payload.url.trim().startsWith('http')
+      ? payload.url.trim()
+      : (() => {
+          const base = `https://www.google.com/maps/dir/?api=1&origin=${enc(payload.origin)}&destination=${enc(payload.destination)}`;
+          return travelModeParam ? `${base}&travelmode=${encodeURIComponent(travelModeParam)}` : base;
+        })();
+    try {
+      const tab2 = await getActiveHttpTab();
+      if (typeof tab2.id === 'number') {
+        await chrome.tabs.update(tab2.id, { url: dirUrl });
+        // wait until complete
+        await new Promise<void>((resolve) => {
+          const started = Date.now();
+          const max = 60000;
+          const listener = (updatedTabId: number, info: chrome.tabs.TabChangeInfo, updatedTab: chrome.tabs.Tab) => {
+            if (updatedTabId !== tab2.id) return;
+            if (info.status === 'complete' && typeof updatedTab.url === 'string' && updatedTab.url.includes('/maps/dir/')) {
+              chrome.tabs.onUpdated.removeListener(listener);
+              resolve();
+            }
+          };
+          chrome.tabs.onUpdated.addListener(listener);
+          const tick = setInterval(async () => {
+            try {
+              const tinfo = await chrome.tabs.get(tab2.id!);
+              if (tinfo.status === 'complete' && typeof tinfo.url === 'string' && tinfo.url.includes('/maps/dir/')) {
+                chrome.tabs.onUpdated.removeListener(listener);
+                clearInterval(tick);
+                resolve();
+              }
+            } catch {}
+            if (Date.now() - started > max) {
+              chrome.tabs.onUpdated.removeListener(listener);
+              clearInterval(tick);
+              resolve();
+            }
+          }, 400);
+        });
+        // Lightweight extraction after direct navigation
+        const [{ result: re }] = await chrome.scripting.executeScript({
+          target: { tabId: tab2.id },
+          world: 'MAIN',
+          func: async () => {
+            function textCompact(s?: string | null, max = 200): string | undefined {
+              if (!s) return undefined;
+              const v = s.replace(/\s+/g, ' ').trim();
+              return v.length ? v.slice(0, max) : undefined;
+            }
+            function parseDuration(text: string): number | undefined {
+              const t = text.toLowerCase();
+              let m = t.match(/(\d+)\s*h\s*(\d+)\s*min/);
+              if (m) return parseInt(m[1]) * 60 + parseInt(m[2]);
+              m = t.match(/(\d+)\s*h(?!\w)/);
+              if (m) return parseInt(m[1]) * 60;
+              m = t.match(/(\d+)\s*min/);
+              if (m) return parseInt(m[1]);
+              return undefined;
+            }
+            function parseDistance(text: string): number | undefined {
+              const m = text.toLowerCase().match(/(\d+[\.,]?\d*)\s*km/);
+              if (m) return parseFloat(m[1].replace(',', '.'));
+              return undefined;
+            }
+            function extractRoutes(): { durationMin: number; distanceKm?: number; text?: string }[] {
+              const results: { durationMin: number; distanceKm?: number; text?: string }[] = [];
+              const nodes = Array.from(document.querySelectorAll('*')) as HTMLElement[];
+              for (const el of nodes) {
+                const txt = textCompact(el.innerText, 300);
+                if (!txt) continue;
+                if (!/(\d+\s*h\s*\d+\s*min|\d+\s*min)/i.test(txt)) continue;
+                const dur = parseDuration(txt);
+                let dist = parseDistance(txt);
+                if (typeof dist !== 'number' && el.parentElement) {
+                  const pTxt = textCompact(el.parentElement.innerText, 300) || '';
+                  dist = parseDistance(pTxt);
+                }
+                if (!dur) continue;
+                results.push({ durationMin: dur, distanceKm: dist, text: txt });
+              }
+              const seen = new Set<string>();
+              const uniq = [] as { durationMin: number; distanceKm?: number; text?: string }[];
+              for (const r of results.sort((a, b) => a.durationMin - b.durationMin)) {
+                const key = `${r.durationMin}|${r.distanceKm ?? ''}`;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                uniq.push(r);
+                if (uniq.length >= 5) break;
+              }
+              return uniq;
+            }
+            await new Promise((res) => setTimeout(res, 600));
+            const routes = extractRoutes();
+            const best = routes[0] ?? null;
+            return { routes, best, pageUrl: window.location.href };
+          },
+        });
+        await logToBackend('route', 'info', 'done', { pageUrl: re?.pageUrl, routes: re?.routes?.length ?? 0, best: re?.best });
+        return re ?? { routes: [], best: null };
+      }
+    } catch {}
+  }
 
   const [{ result }] = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
@@ -568,9 +685,20 @@ async function computeFastestRoute(payload: { origin: string; destination: strin
       }
 
       async function navigateToDir(origin: string, dest: string) {
-        const enc = (s: string) => encodeURIComponent(s.trim());
-        const url = `https://www.google.com/maps/dir/${enc(origin)}/${enc(dest)}`;
-        log('navigate_dir_url', { url });
+        const enc = (s: string) => encodeURIComponent(String(s ?? '').trim());
+        // Map requestedMode (raw string) to Google maps travelmode param
+        const raw = (requestedMode || '').toLowerCase();
+        let travelParam: string | null = null;
+        if (raw) {
+          if (/(velo|vélo|bike|cycl)/i.test(raw)) travelParam = 'bicycling';
+          else if (/(two|2).*-?wheeler|deux.?roues|scooter|moto/i.test(raw)) travelParam = 'two-wheeler';
+          else if (/(pied|walk|marche|foot)/i.test(raw)) travelParam = 'walking';
+          else if (/(train|metro|métro|rer|tram|bus|transit|transport)/i.test(raw)) travelParam = 'transit';
+          else if (/(drive|car|auto|voiture|condui)/i.test(raw)) travelParam = 'driving';
+        }
+        const base = `https://www.google.com/maps/dir/?api=1&origin=${enc(origin)}&destination=${enc(dest)}`;
+        const url = travelParam ? `${base}&travelmode=${encodeURIComponent(travelParam)}` : base;
+        log('navigate_dir_url', { url, requestedMode });
         window.location.assign(url);
       }
       function extractRoutes(
@@ -613,7 +741,8 @@ async function computeFastestRoute(payload: { origin: string; destination: strin
         if (btns.length) {
           (btns[0] as HTMLElement).click();
           await sleep(800);
-          await waitForRoutes(2000);
+          // small settle delay
+          await sleep(2000);
           const f = findDirectionsFields();
           a = f.a;
           b = f.b;
@@ -708,8 +837,18 @@ async function computeFastestRoute(payload: { origin: string; destination: strin
     // Fallback: hard navigate via background then re-inject a lightweight extractor
     const tab2 = await getActiveHttpTab();
     if (typeof tab2.id === 'number') {
-      const enc = (s: string) => encodeURIComponent(s.trim());
-      const dirUrl = `https://www.google.com/maps/dir/${enc(payload.origin)}/${enc(payload.destination)}`;
+      const enc = (s: string) => encodeURIComponent(String(s ?? '').trim());
+      const raw = String(payload.mode ?? '').toLowerCase();
+      let travelParam: string | null = null;
+      if (raw) {
+        if (/(velo|vélo|bike|cycl)/i.test(raw)) travelParam = 'bicycling';
+        else if (/(two|2).*-?wheeler|deux.?roues|scooter|moto/i.test(raw)) travelParam = 'two-wheeler';
+        else if (/(pied|walk|marche|foot)/i.test(raw)) travelParam = 'walking';
+        else if (/(train|metro|métro|rer|tram|bus|transit|transport)/i.test(raw)) travelParam = 'transit';
+        else if (/(drive|car|auto|voiture|condui)/i.test(raw)) travelParam = 'driving';
+      }
+      const base = `https://www.google.com/maps/dir/?api=1&origin=${enc(payload.origin)}&destination=${enc(payload.destination)}`;
+      const dirUrl = travelParam ? `${base}&travelmode=${encodeURIComponent(travelParam)}` : base;
       await chrome.tabs.update(tab2.id, { url: dirUrl });
       // wait until complete
       await new Promise<void>((resolve) => {
@@ -817,7 +956,7 @@ async function computeFastestRoute(payload: { origin: string; destination: strin
               loop();
             });
           }
-          await waitForRoutesUntil(extractRoutes, 60000);
+          await waitForRoutesUntil(extractRoutes, 90000);
           const routes = extractRoutes();
           const best = routes[0] ?? null;
           return { routes, best, pageUrl: window.location.href };

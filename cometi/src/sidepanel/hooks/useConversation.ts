@@ -15,9 +15,11 @@ const SYSTEM_PROMPT: ChromeChatMessage = {
     MARKDOWN_GUIDELINES_FR,
     // Tool instructions for autonomous route computation on GPS sites
     'Tu peux, si nécessaire, calculer un itinéraire le plus rapide sur une page de cartographie/itinéraire ouverte (ex.: Google Maps) en émettant UNIQUEMENT une commande balisée, sans texte superflu:',
-    '  <ROUTE origin="..." destination="..." options="..."/>',
+    '  <ROUTE origin="..." destination="..." options="..." url="..."/>',
     '- Utilise cette commande seulement si la question de l’utilisateur concerne un trajet (ex. "trajet le plus rapide entre X et Y").',
     '- Remplis origin/destination à partir du message de l’utilisateur; les options (par ex. éviter péages/autoroutes, via=...) proviennent aussi du message.',
+    '- Déduis et spécifie TOUJOURS le mode de transport dans options sous la forme options="mode=driving|walking|bicycling|two-wheeler|transit". Exemple: voiture → driving, à pied → walking, vélo → bicycling, deux-roues → two-wheeler, transports → transit.',
+    '- Construis et renseigne également l’URL Google Maps Directions (paramètre api=1) dans l’attribut url, en incluant travelmode si pertinent: https://www.google.com/maps/dir/?api=1&origin=...&destination=...&travelmode=... .',
     '- N’ajoute aucun autre texte si tu émets la balise; le résultat sera exécuté et tu formateras ensuite la réponse.',
   ].join('\n\n'),
 };
@@ -157,7 +159,7 @@ export function useConversation() {
 
   // No JSON formatting; we stream and render plain text directly.
 
-  function parseRouteCommand(text: string): { origin?: string; destination?: string; options?: string } | null {
+  function parseRouteCommand(text: string): { origin?: string; destination?: string; options?: string; url?: string } | null {
     // Normalize typographic quotes to straight quotes
     const normalized = text.replace(/[“”]/g, '"').replace(/[‘’]/g, '"');
     const m = normalized.match(/<ROUTE\b([^>]*)\/>/i);
@@ -168,7 +170,7 @@ export function useConversation() {
       const mm = attrs.match(re);
       return mm ? mm[1].trim() : undefined;
     };
-    return { origin: getAttr('origin'), destination: getAttr('destination'), options: getAttr('options') };
+    return { origin: getAttr('origin'), destination: getAttr('destination'), options: getAttr('options'), url: getAttr('url') };
   }
 
   const ROUTE_MODE_LABELS = {
@@ -176,6 +178,7 @@ export function useConversation() {
     transit: 'Transports en commun',
     walking: 'À pied',
     cycling: 'Vélo',
+    'two-wheeler': 'Deux-roues',
   } as const;
 
   type RouteModeKey = keyof typeof ROUTE_MODE_LABELS;
@@ -185,6 +188,7 @@ export function useConversation() {
     { key: 'transit', patterns: [/train/i, /métro/i, /metro/i, /tram/i, /rer/i, /bus/i, /transport/i, /transit/i] },
     { key: 'walking', patterns: [/à pied/i, /a pied/i, /marche/i, /walk/i, /walking/i, /piéton/i] },
     { key: 'cycling', patterns: [/vélo/i, /velo/i, /bike/i, /cycling/i, /bicyc/i] },
+    { key: 'two-wheeler', patterns: [/deux[- ]?roues/i, /two[- ]?wheeler/i, /moto/i, /scooter/i] },
   ];
 
   const detectRouteMode = (text: string): RouteModeKey | undefined => {
@@ -418,20 +422,40 @@ export function useConversation() {
             (async () => {
               try {
                 updateAssistantMessage(placeholderId, 'Calcul de l\'itinéraire…', { isLoading: true });
-                const requestedMode = inferRouteMode(cmd, content) ?? 'driving';
-                const res = await computeFastestRouteViaBackground({
+                // Mode: on privilégie ce que fournit l'IA (options.mode).
+                // Si absent, on retombe sur une détection heuristique à partir du texte utilisateur.
+                const opts = parseRouteOptionsString(cmd.options);
+                const requestedMode = (typeof opts.mode === 'string' && opts.mode.trim().length > 0)
+                  ? opts.mode.trim().toLowerCase()
+                  : (inferRouteMode(cmd, content) ?? 'driving');
+                let res = await computeFastestRouteViaBackground({
                   origin: cmd.origin!,
                   destination: cmd.destination!,
                   language: 'fr',
                   mode: requestedMode,
+                  url: cmd.url,
                 });
-                const best = res.best;
+                let best = res.best;
+                // If no route found for the requested mode, attempt a graceful fallback to driving
+                let effectiveMode = requestedMode;
+                if (!best) {
+                  const reqLabel = requestedMode ? (ROUTE_MODE_LABELS as any)[requestedMode] ?? requestedMode : undefined;
+                  updateAssistantMessage(placeholderId, reqLabel ? `Aucun itinéraire trouvé pour ${reqLabel}. Essai en Voiture…` : 'Aucun itinéraire trouvé. Essai en Voiture…', { isLoading: true });
+                  res = await computeFastestRouteViaBackground({
+                    origin: cmd.origin!,
+                    destination: cmd.destination!,
+                    language: 'fr',
+                    mode: 'driving',
+                  });
+                  best = res.best;
+                  effectiveMode = effectiveMode ?? 'driving';
+                }
                 if (!best) {
                   updateAssistantMessage(placeholderId, 'Impossible de trouver un trajet.', { isError: true });
                   return;
                 }
                 const alternatives = res.routes.filter((route) => route !== best).slice(0, 4);
-                const requestedModeLabel = requestedMode ? ROUTE_MODE_LABELS[requestedMode] ?? requestedMode : undefined;
+                const requestedModeLabel = effectiveMode ? (ROUTE_MODE_LABELS as any)[effectiveMode] ?? effectiveMode : undefined;
                 const exploredModes = Array.from(
                   new Set(
                     res.routes

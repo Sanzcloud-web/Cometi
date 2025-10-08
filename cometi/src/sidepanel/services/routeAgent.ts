@@ -14,6 +14,7 @@ export async function computeFastestRouteViaBackground(params: {
   destination: string;
   language?: string;
   mode?: string;
+  url?: string;
 }): Promise<RouteComputeResult> {
   if (typeof chrome === 'undefined' || typeof chrome.runtime?.sendMessage !== 'function') {
     throw new Error('Commande disponible uniquement dans Chrome.');
@@ -32,4 +33,3 @@ export async function computeFastestRouteViaBackground(params: {
     });
   });
 }
-
