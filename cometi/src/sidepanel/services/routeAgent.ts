@@ -1,4 +1,10 @@
-export type RouteVariant = { durationMin: number; distanceKm?: number; text?: string };
+export type RouteVariant = {
+  durationMin: number;
+  distanceKm?: number;
+  text?: string;
+  mode?: string;
+  modeLabel?: string;
+};
 export type RouteComputeResult = { routes: RouteVariant[]; best: RouteVariant | null };
 
 type BgResponse = { ok: boolean; result?: RouteComputeResult; error?: string };
@@ -7,6 +13,7 @@ export async function computeFastestRouteViaBackground(params: {
   origin: string;
   destination: string;
   language?: string;
+  mode?: string;
 }): Promise<RouteComputeResult> {
   if (typeof chrome === 'undefined' || typeof chrome.runtime?.sendMessage !== 'function') {
     throw new Error('Commande disponible uniquement dans Chrome.');

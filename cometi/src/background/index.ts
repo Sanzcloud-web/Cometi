@@ -77,8 +77,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message?.type === 'route:compute') {
-    const { origin, destination, language } = message.payload ?? {};
-    void computeFastestRoute({ origin, destination, language })
+    const { origin, destination, language, mode } = message.payload ?? {};
+    void computeFastestRoute({ origin, destination, language, mode })
       .then((result) => sendResponse({ ok: true, result }))
       .catch((error: unknown) => {
         sendResponse({ ok: false, error: error instanceof Error ? error.message : 'Échec du calcul de trajet.' });
@@ -229,22 +229,59 @@ async function collectDomFields(): Promise<DomFieldFeature[]> {
   return result ?? [];
 }
 
-async function computeFastestRoute(payload: { origin: string; destination: string; language?: string }): Promise<{
+async function computeFastestRoute(payload: { origin: string; destination: string; language?: string; mode?: string }): Promise<{
   best: { durationMin: number; distanceKm?: number; text?: string } | null;
   routes: { durationMin: number; distanceKm?: number; text?: string }[];
   pageUrl?: string;
 }> {
   const tab = await getActiveHttpTab();
   if (typeof tab.id !== 'number') throw new Error("Impossible de déterminer l'onglet actif.");
-  await logToBackend('route', 'info', 'start', { origin: payload.origin, destination: payload.destination, url: tab.url });
+  await logToBackend('route', 'info', 'start', {
+    origin: payload.origin,
+    destination: payload.destination,
+    url: tab.url,
+    mode: payload.mode ?? null,
+  });
 
   const [{ result }] = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     world: 'MAIN',
-    args: [payload.origin, payload.destination],
-    func: async (originValue: string, destinationValue: string) => {
+    args: [payload.origin, payload.destination, payload.mode ?? null],
+    func: async (originValue: string, destinationValue: string, requestedMode: string | null) => {
       const dbg: any[] = [];
       const log = (msg: string, data?: any) => { dbg.push({ msg, data }); };
+
+      type TravelMode = 'driving' | 'transit' | 'walking' | 'cycling';
+      const MODE_CONFIG: Record<TravelMode, { label: string; keywords: string[] }> = {
+        driving: {
+          label: 'Voiture',
+          keywords: ['driving', 'drive', 'voiture', 'car', 'auto', 'automobile'],
+        },
+        transit: {
+          label: 'Transports en commun',
+          keywords: ['transit', 'transport', 'public', 'commun', 'bus', 'train', 'rer', 'metro', 'tram', 'rail'],
+        },
+        walking: {
+          label: 'À pied',
+          keywords: ['walking', 'walk', 'marche', 'pied', 'foot'],
+        },
+        cycling: {
+          label: 'Vélo',
+          keywords: ['cycling', 'bike', 'vélo', 'bicycle', 'bicyclette'],
+        },
+      };
+
+      const normalizeMode = (value?: string | null): TravelMode | undefined => {
+        if (!value) return undefined;
+        const low = value.toLowerCase();
+        if (/(velo|vélo|bike|cycl)/i.test(low)) return 'cycling';
+        if (/(pied|walk|marche|foot)/i.test(low)) return 'walking';
+        if (/(train|metro|métro|rer|tram|bus|transit|transport)/i.test(low)) return 'transit';
+        if (/(drive|car|auto|voiture|condui)/i.test(low)) return 'driving';
+        return undefined;
+      };
+
+      const requestedTravelMode = normalizeMode(requestedMode);
       function textCompact(s?: string | null, max = 200): string | undefined {
         if (!s) return undefined;
         const v = s.replace(/\s+/g, ' ').trim();
@@ -355,6 +392,65 @@ async function computeFastestRoute(payload: { origin: string; destination: strin
         return unique;
       }
 
+      function findTravelModeButton(mode: TravelMode): HTMLElement | null {
+        const keywords = MODE_CONFIG[mode].keywords;
+        const nodes = Array.from(
+          document.querySelectorAll<HTMLElement>('button, [role="button"], [aria-pressed], [aria-selected]')
+        );
+        for (const node of nodes) {
+          const button = (node.closest('button') as HTMLElement) || node;
+          const texts = [
+            button.getAttribute('aria-label') || '',
+            button.getAttribute('title') || '',
+            button.textContent || '',
+            node.getAttribute('aria-label') || '',
+            node.getAttribute('title') || '',
+            node.textContent || '',
+          ];
+          const dataVals = [
+            button.getAttribute('data-travel_mode') || '',
+            button.getAttribute('data-value') || '',
+            node.getAttribute('data-travel_mode') || '',
+            node.getAttribute('data-value') || '',
+          ];
+          for (const raw of dataVals) {
+            const low = raw.toLowerCase();
+            if (!low) continue;
+            if (['d', 'driving', 'drive', '0'].includes(low) && mode === 'driving') return button;
+            if (['t', 'transit', 'transport', '3', 'public'].includes(low) && mode === 'transit') return button;
+            if (['w', 'walking', 'walk', '1', 'pedestrian'].includes(low) && mode === 'walking') return button;
+            if (['b', 'cycling', 'bike', '2', 'bicycling'].includes(low) && mode === 'cycling') return button;
+          }
+          for (const txt of texts) {
+            const low = txt.trim().toLowerCase();
+            if (!low) continue;
+            if (keywords.some((kw) => low.includes(kw))) return button;
+          }
+        }
+        return null;
+      }
+
+      function isModeButtonActive(button: HTMLElement): boolean {
+        if (button.getAttribute('aria-pressed') === 'true') return true;
+        if (button.getAttribute('aria-selected') === 'true') return true;
+        const cls = button.className || '';
+        return /selected|active|on/i.test(cls);
+      }
+
+      async function ensureTravelMode(mode: TravelMode): Promise<void> {
+        const button = findTravelModeButton(mode);
+        if (!button) {
+          log('mode_button_missing', { mode });
+          return;
+        }
+        if (!isModeButtonActive(button)) {
+          button.scrollIntoView({ block: 'center' });
+          button.click();
+          await sleep(200);
+        }
+        await waitForRoutesUntil(() => extractRoutes(mode, MODE_CONFIG[mode].label), 45000);
+      }
+
       function scoreField(el: HTMLElement): number {
         const labelTexts = [
           (el.getAttribute('aria-label') || ''),
@@ -442,7 +538,10 @@ async function computeFastestRoute(payload: { origin: string; destination: strin
         if (m) return parseFloat(m[1].replace(',', '.'));
         return undefined;
       }
-      async function waitForRoutesUntil(extract: () => { durationMin: number; distanceKm?: number; text?: string }[], maxWaitMs = 45000): Promise<void> {
+      async function waitForRoutesUntil(
+        extract: () => { durationMin: number; distanceKm?: number; text?: string; mode?: string; modeLabel?: string }[],
+        maxWaitMs = 45000
+      ): Promise<void> {
         const start = Date.now();
         let lastCount = 0;
         let lastChange = Date.now();
@@ -474,7 +573,10 @@ async function computeFastestRoute(payload: { origin: string; destination: strin
         log('navigate_dir_url', { url });
         window.location.assign(url);
       }
-      function extractRoutes(): { durationMin: number; distanceKm?: number; text?: string }[] {
+      function extractRoutes(
+        mode?: TravelMode,
+        modeLabel?: string
+      ): { durationMin: number; distanceKm?: number; text?: string; mode?: string; modeLabel?: string }[] {
         const results: { durationMin: number; distanceKm?: number; text?: string }[] = [];
         const nodes = Array.from(document.querySelectorAll('*')) as HTMLElement[];
         for (const el of nodes) {
@@ -501,7 +603,7 @@ async function computeFastestRoute(payload: { origin: string; destination: strin
           uniq.push(r);
           if (uniq.length >= 5) break;
         }
-        return uniq;
+        return uniq.map((item) => ({ ...item, mode, modeLabel }));
       }
 
       // 0) Ensure directions panel if needed (click Directions button once)
@@ -528,23 +630,68 @@ async function computeFastestRoute(payload: { origin: string; destination: strin
       log('using_fields', { a: a.tagName.toLowerCase(), b: b.tagName.toLowerCase(), aPh: (a as HTMLInputElement).placeholder, bPh: (b as HTMLInputElement).placeholder });
       await fillAndSubmit(a, b, originValue, destinationValue);
 
-      // 2) Wait for rendering to settle
-      await waitForRoutesUntil(extractRoutes);
+      const primaryMode = requestedTravelMode;
+      const primaryLabel = primaryMode ? MODE_CONFIG[primaryMode].label : undefined;
+      const getPrimaryRoutes = () => extractRoutes(primaryMode, primaryLabel);
+
+      // 2) Wait for rendering to settle on the primary mode (or default)
+      await waitForRoutesUntil(getPrimaryRoutes);
       // If still no routes extracted, try a small nudge (press Enter on destination again) and wait longer
-      if (extractRoutes().length === 0) {
+      if (getPrimaryRoutes().length === 0) {
         log('nudge_destination_enter');
         await pressEnter(b);
-        await waitForRoutesUntil(extractRoutes, 30000);
+        await waitForRoutesUntil(getPrimaryRoutes, 30000);
       }
       // If still nothing, hard navigate to Maps dir URL
-      if (extractRoutes().length === 0) {
+      if (getPrimaryRoutes().length === 0) {
         await navigateToDir(originValue, destinationValue);
-        await waitForRoutesUntil(extractRoutes, 60000);
+        await waitForRoutesUntil(getPrimaryRoutes, 60000);
       }
 
-      // 3) Extract route variants
-      const routes = extractRoutes();
-      log('routes_extracted', { count: routes.length });
+      const aggregated: { durationMin: number; distanceKm?: number; text?: string; mode?: string; modeLabel?: string }[] = [];
+      const seen = new Set<string>();
+      const pushRoutes = (
+        routes: { durationMin: number; distanceKm?: number; text?: string; mode?: string; modeLabel?: string }[]
+      ) => {
+        for (const route of routes) {
+          const key = `${route.mode ?? 'default'}|${route.durationMin}|${route.distanceKm ?? ''}|${route.text ?? ''}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          aggregated.push(route);
+          if (aggregated.length >= 5) break;
+        }
+      };
+
+      const collectForMode = async (mode?: TravelMode) => {
+        const label = mode ? MODE_CONFIG[mode].label : undefined;
+        if (mode) {
+          await ensureTravelMode(mode);
+        } else {
+          await waitForRoutesUntil(() => extractRoutes(undefined, undefined));
+        }
+        pushRoutes(extractRoutes(mode, label));
+      };
+
+      if (requestedTravelMode) {
+        await collectForMode(requestedTravelMode);
+        if (aggregated.length < 3) {
+          await waitForRoutesUntil(() => extractRoutes(requestedTravelMode, MODE_CONFIG[requestedTravelMode].label), 30000);
+          pushRoutes(extractRoutes(requestedTravelMode, MODE_CONFIG[requestedTravelMode].label));
+        }
+      } else {
+        await collectForMode(undefined);
+        const modeOrder: TravelMode[] = ['driving', 'transit', 'walking', 'cycling'];
+        for (const mode of modeOrder) {
+          if (aggregated.length >= 5) break;
+          await collectForMode(mode);
+          if (aggregated.length >= 3) break;
+        }
+      }
+
+      const routes = aggregated
+        .slice(0, 5)
+        .sort((a, b) => a.durationMin - b.durationMin);
+      log('routes_extracted', { count: routes.length, requestedMode: requestedTravelMode ?? null });
       const best = routes[0] ?? null;
       return { routes, best, pageUrl: window.location.href, debug: dbg } as any;
     },
@@ -616,7 +763,7 @@ async function computeFastestRoute(payload: { origin: string; destination: strin
             if (m) return parseFloat(m[1].replace(',', '.'));
             return undefined;
           }
-          function extractRoutes(): { durationMin: number; distanceKm?: number; text?: string }[] {
+          function extractRoutes(): { durationMin: number; distanceKm?: number; text?: string; mode?: string; modeLabel?: string }[] {
             const results: { durationMin: number; distanceKm?: number; text?: string }[] = [];
             const nodes = Array.from(document.querySelectorAll('*')) as HTMLElement[];
             for (const el of nodes) {
@@ -633,17 +780,20 @@ async function computeFastestRoute(payload: { origin: string; destination: strin
               results.push({ durationMin: dur, distanceKm: dist, text: txt });
             }
             const seen = new Set<string>();
-            const uniq = [] as { durationMin: number; distanceKm?: number; text?: string }[];
+            const uniq = [] as { durationMin: number; distanceKm?: number; text?: string; mode?: string; modeLabel?: string }[];
             for (const r of results.sort((a, b) => a.durationMin - b.durationMin)) {
               const key = `${r.durationMin}|${r.distanceKm ?? ''}`;
               if (seen.has(key)) continue;
               seen.add(key);
-              uniq.push(r);
+              uniq.push({ ...r, mode: undefined, modeLabel: undefined });
               if (uniq.length >= 5) break;
             }
             return uniq;
           }
-          async function waitForRoutesUntil(extract: () => { durationMin: number; distanceKm?: number; text?: string }[], maxWaitMs = 60000): Promise<void> {
+          async function waitForRoutesUntil(
+            extract: () => { durationMin: number; distanceKm?: number; text?: string; mode?: string; modeLabel?: string }[],
+            maxWaitMs = 60000
+          ): Promise<void> {
             const start = Date.now();
             let lastCount = 0;
             let lastChange = Date.now();
