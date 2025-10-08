@@ -92,32 +92,42 @@ export function Composer({
     });
   };
 
+  const showSuggestions = draft.trim().length === 0;
+
   return (
     <form
       onSubmit={onSubmit}
       className="rounded-2xl border border-[#C7CDCD] bg-[#FCFCF9] p-3 shadow-sm"
     >
       <div className="flex flex-col gap-3">
-        <SuggestionsTray
-          suggestions={suggestions}
-          isLoading={areSuggestionsLoading}
-          isRefreshing={areSuggestionsRefreshing}
-          error={suggestionsError}
-          onRetry={onRefreshSuggestions}
-          onSelect={(suggestion) => {
-            if (onSuggestionSelected) {
-              onSuggestionSelected(suggestion);
-              return;
-            }
-            onDraftChange(suggestion.label);
-            requestAnimationFrame(() => {
-              if (textareaRef.current) {
-                textareaRef.current.focus();
-                adjustTextareaSize(textareaRef.current);
+        <div
+          className={[
+            'overflow-hidden transition-all duration-300',
+            showSuggestions ? 'max-h-40 opacity-100 mt-0' : 'max-h-0 opacity-0 -mt-2 pointer-events-none',
+          ].join(' ')}
+          aria-hidden={!showSuggestions}
+        >
+          <SuggestionsTray
+            suggestions={suggestions}
+            isLoading={areSuggestionsLoading}
+            isRefreshing={areSuggestionsRefreshing}
+            error={suggestionsError}
+            onRetry={onRefreshSuggestions}
+            onSelect={(suggestion) => {
+              if (onSuggestionSelected) {
+                onSuggestionSelected(suggestion);
+                return;
               }
-            });
-          }}
-        />
+              onDraftChange(suggestion.label);
+              requestAnimationFrame(() => {
+                if (textareaRef.current) {
+                  textareaRef.current.focus();
+                  adjustTextareaSize(textareaRef.current);
+                }
+              });
+            }}
+          />
+        </div>
         <div className="flex items-end gap-3">
           <div className="flex-1">
             <Textarea
