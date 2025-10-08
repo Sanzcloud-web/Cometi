@@ -10,7 +10,7 @@ type Props = {
 
 export function HistorySidebar({ isOpen, chats, onSelect, onClose }: Props): JSX.Element {
   return (
-    <div className={`transition-all duration-200 ${isOpen ? 'w-64' : 'w-0'} overflow-hidden bg-[#ECECEC] rounded-xl`}> 
+    <div className={`transition-all duration-200 ${isOpen ? 'w-64' : 'w-0'} overflow-hidden bg-[#FCFCF9] rounded-xl`}> 
       <div className="h-full flex flex-col">
         <div className="flex items-center justify-between px-3 py-2 ">
           <div className="text-sm font-medium opacity-80">Historique</div>

@@ -37,6 +37,23 @@ export function useConversation() {
     return idCounterRef.current;
   };
 
+  const asUserFriendlyError = (error: unknown): string => {
+    const raw = error instanceof Error ? error.message : String(error ?? '');
+    if (/Impossible de déterminer l'onglet actif\.?/i.test(raw)) {
+      return "Je ne peux pas accéder à l’onglet actif. Ouvre un onglet web (HTTP/HTTPS) visible puis réessaie.";
+    }
+    if (/L'URL de l'onglet actif doit être accessible/i.test(raw)) {
+      return "L’onglet actif n’est pas une page web. Sélectionne une page HTTP/HTTPS et réessaie.";
+    }
+    if (/Commande disponible uniquement dans Chrome/i.test(raw)) {
+      return "Cette action nécessite l’extension Chrome active.";
+    }
+    return (
+      (error instanceof Error && error.message) ||
+      "Une erreur inattendue est survenue lors de l'appel au backend Cometi."
+    );
+  };
+
   const appendAssistantMessage = (
     text: string,
     options?: { isError?: boolean; actions?: MessageAction[]; isLoading?: boolean }
@@ -208,10 +225,7 @@ export function useConversation() {
           const actions: MessageAction[] = [{ type: 'copy', label: 'Copier le résumé', value: finalText }];
           updateAssistantMessage(placeholderId, finalText, { actions });
         } catch (error: unknown) {
-          const message =
-            error instanceof Error
-              ? error.message
-              : 'Impossible de produire le résumé de la page active.';
+          const message = asUserFriendlyError(error);
           updateAssistantMessage(placeholderId, message, { isError: true });
         } finally {
           setIsLoading(false);
@@ -304,10 +318,7 @@ export function useConversation() {
         });
         void refreshChats();
       } catch (error: unknown) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Une erreur inattendue est survenue lors de l'appel au backend Cometi.";
+        const message = asUserFriendlyError(error);
         updateAssistantMessage(placeholderId, message, { isError: true });
       } finally {
         setIsLoading(false);

@@ -2,7 +2,7 @@ import type { FormEvent } from 'react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
-import { PaperAirplaneIcon } from './icons';
+import { ArrowRightIcon } from './icons';
 import { SlashCommandMenu, SlashCommand } from './SlashCommandMenu';
 import { SLASH_COMMANDS } from '../commands';
 import { SuggestionsTray } from './SuggestionsTray';
@@ -95,7 +95,7 @@ export function Composer({
   return (
     <form
       onSubmit={onSubmit}
-      className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm"
+      className="rounded-2xl border border-[#C7CDCD] bg-[#FCFCF9] p-3 shadow-sm"
     >
       <div className="flex flex-col gap-3">
         <SuggestionsTray
@@ -194,9 +194,10 @@ export function Composer({
             type="submit"
             aria-label="Envoyer le message"
             disabled={isSubmitting || draft.trim().length === 0}
-            className="h-10 w-10 rounded-full bg-slate-900 text-white hover:bg-slate-800"
+            variant="default"
+            className="h-10 w-10 rounded-full bg-[#22808D] text-white hover:bg-[#2493A3] hover:text-white"
           >
-            <PaperAirplaneIcon className="h-4 w-4" />
+            <ArrowRightIcon className="h-5 w-5" />
           </Button>
         </div>
       </div>

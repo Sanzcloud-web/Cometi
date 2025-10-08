@@ -71,7 +71,7 @@ export function MessageItem({ message }: MessageItemProps): JSX.Element {
                   key={`${action.label}-${index}`}
                   type="button"
                   onClick={() => handleAction(action)}
-                  className="inline-flex items-center rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                  className="inline-flex items-center rounded-md border border-[#C7CDCD] bg-[#FCFCF9] px-2.5 py-1 text-xs font-medium text-slate-700 transition hover:border-[#C7CDCD] hover:bg-[#FCFCF9]"
                 >
                   {action.label}
                 </button>
@@ -86,7 +86,7 @@ export function MessageItem({ message }: MessageItemProps): JSX.Element {
   // User style: right-aligned subtle bubble
   return (
     <div className="flex justify-end px-4 py-4">
-      <div className="max-w-[80%] rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
+      <div className="max-w-[80%] rounded-2xl border border-[#C7CDCD] bg-[#FCFCF9] px-3 py-2">
         <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-900">{message.text}</p>
       </div>
     </div>

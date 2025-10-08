@@ -5,9 +5,9 @@ import { Button } from './ui/button';
 const PLACEHOLDER_ITEMS = Array.from({ length: 3 });
 
 const CHIP_CLASS = cx(
-  'rounded-full border border-slate-200 bg-slate-50 px-4 py-1.5 text-sm font-medium text-slate-700 transition',
-  'hover:border-slate-300 hover:bg-slate-100',
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 focus-visible:ring-offset-white'
+  'rounded-full border border-[#C7CDCD] bg-[#FCFCF9] px-4 py-1.5 text-sm font-medium text-slate-700 transition',
+  'hover:border-[#C7CDCD] hover:bg-[#FCFCF9]',
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#FCFCF9]'
 );
 type SuggestionsTrayProps = {
   suggestions: Suggestion[];
