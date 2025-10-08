@@ -2,7 +2,7 @@ import * as React from 'react';
 import { cx } from '../../utils/cx';
 
 type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: 'default' | 'ghost';
+  variant?: 'default' | 'ghost' | 'brand';
 };
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
@@ -11,6 +11,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     const variants: Record<NonNullable<ButtonProps['variant']>, string> = {
       default: 'bg-slate-900 text-white hover:bg-slate-800 focus-visible:ring-slate-900',
       ghost: 'bg-transparent text-slate-600 hover:bg-slate-100 focus-visible:ring-slate-200',
+      brand: 'bg-[#22808D] text-white hover:bg-[#2493A3] focus-visible:ring-[#22808D]',
     };
 
     return (

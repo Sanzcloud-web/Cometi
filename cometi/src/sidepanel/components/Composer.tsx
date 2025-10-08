@@ -194,8 +194,8 @@ export function Composer({
             type="submit"
             aria-label="Envoyer le message"
             disabled={isSubmitting || draft.trim().length === 0}
-            variant="default"
-            className="h-10 w-10 rounded-full bg-[#22808D] text-white hover:bg-[#2493A3] hover:text-white"
+            variant="brand"
+            className="h-10 w-10 rounded-full"
           >
             <ArrowRightIcon className="h-5 w-5" />
           </Button>
