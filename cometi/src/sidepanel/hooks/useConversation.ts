@@ -5,7 +5,7 @@ import { requestPageAnswerStream, requestResumeContext } from '../services/pageA
 import type { ChromeChatMessage, ConversationMessage, MessageAction } from '../types/chat';
 import { MARKDOWN_GUIDELINES_FR } from '../../shared/markdownGuidelines';
 import { createChat as apiCreateChat, listChats as apiListChats, loadChat as apiLoadChat, type ChatSummary } from '../services/historyClient';
-import { computeFastestRouteViaBackground } from '../services/routeAgent';
+import { computeFastestRouteViaBackground, type RouteVariant } from '../services/routeAgent';
 
 const SYSTEM_PROMPT: ChromeChatMessage = {
   role: 'system',
@@ -168,6 +168,78 @@ export function useConversation() {
     };
     return { origin: getAttr('origin'), destination: getAttr('destination'), options: getAttr('options') };
   }
+
+  const ROUTE_MODE_LABELS = {
+    driving: 'Voiture',
+    transit: 'Transports en commun',
+    walking: 'À pied',
+    cycling: 'Vélo',
+  } as const;
+
+  type RouteModeKey = keyof typeof ROUTE_MODE_LABELS;
+
+  const ROUTE_MODE_KEYWORDS: { key: RouteModeKey; patterns: RegExp[] }[] = [
+    { key: 'driving', patterns: [/voiture/i, /\bauto/i, /condui/i, /\bcar\b/i, /drive/i] },
+    { key: 'transit', patterns: [/train/i, /métro/i, /metro/i, /tram/i, /rer/i, /bus/i, /transport/i, /transit/i] },
+    { key: 'walking', patterns: [/à pied/i, /a pied/i, /marche/i, /walk/i, /walking/i, /piéton/i] },
+    { key: 'cycling', patterns: [/vélo/i, /velo/i, /bike/i, /cycling/i, /bicyc/i] },
+  ];
+
+  const detectRouteMode = (text: string): RouteModeKey | undefined => {
+    const low = text.toLowerCase();
+    for (const entry of ROUTE_MODE_KEYWORDS) {
+      if (entry.patterns.some((pattern) => pattern.test(low))) {
+        return entry.key;
+      }
+    }
+    return undefined;
+  };
+
+  const parseRouteOptionsString = (raw?: string): Record<string, string> => {
+    if (!raw) return {};
+    return raw
+      .split(/[;,]/)
+      .map((segment) => segment.trim())
+      .filter(Boolean)
+      .reduce<Record<string, string>>((acc, segment) => {
+        const eqIndex = segment.indexOf('=');
+        if (eqIndex === -1) return acc;
+        const key = segment.slice(0, eqIndex).trim().toLowerCase();
+        const value = segment
+          .slice(eqIndex + 1)
+          .trim()
+          .replace(/^"|"$/g, '');
+        if (key) acc[key] = value;
+        return acc;
+      }, {});
+  };
+
+  const inferRouteMode = (
+    command: { options?: string } | null,
+    userText: string
+  ): RouteModeKey | undefined => {
+    const opts = parseRouteOptionsString(command?.options);
+    if (typeof opts.mode === 'string') {
+      const direct = detectRouteMode(opts.mode);
+      if (direct) return direct;
+    }
+    if (command?.options) {
+      const detected = detectRouteMode(command.options);
+      if (detected) return detected;
+    }
+    return detectRouteMode(userText);
+  };
+
+  const getRouteModeLabel = (route: RouteVariant): string | undefined =>
+    route.modeLabel || (route.mode && ROUTE_MODE_LABELS[route.mode as RouteModeKey]) || route.mode || undefined;
+
+  const formatRouteVariant = (route: RouteVariant): string => {
+    const base = `${route.durationMin} min${
+      typeof route.distanceKm === 'number' ? ` (${route.distanceKm} km)` : ''
+    }`;
+    const modeLabel = getRouteModeLabel(route);
+    return modeLabel ? `${modeLabel} – ${base}` : base;
+  };
 
   const requestAssistantReply = async (history: ConversationMessage[], onStream?: (delta: string) => void) => {
     const payloadMessages: ChromeChatMessage[] = [
@@ -335,20 +407,37 @@ export function useConversation() {
             (async () => {
               try {
                 updateAssistantMessage(placeholderId, 'Calcul de l\'itinéraire…', { isLoading: true });
-                const res = await computeFastestRouteViaBackground({ origin: cmd.origin!, destination: cmd.destination!, language: 'fr' });
+                const requestedMode = inferRouteMode(cmd, content);
+                const res = await computeFastestRouteViaBackground({
+                  origin: cmd.origin!,
+                  destination: cmd.destination!,
+                  language: 'fr',
+                  mode: requestedMode,
+                });
                 const best = res.best;
                 if (!best) {
                   updateAssistantMessage(placeholderId, 'Impossible de trouver un trajet.', { isError: true });
                   return;
                 }
-                const alts = res.routes.slice(1, 3);
+                const alternatives = res.routes.filter((route) => route !== best).slice(0, 4);
+                const requestedModeLabel = requestedMode ? ROUTE_MODE_LABELS[requestedMode] ?? requestedMode : undefined;
+                const exploredModes = Array.from(
+                  new Set(
+                    res.routes
+                      .map((route) => getRouteModeLabel(route))
+                      .filter((value): value is string => Boolean(value))
+                  )
+                );
                 // Stream a proper answer from the LLM using the computed results
                 const facts = [
                   `Origine: ${cmd.origin}`,
                   `Destination: ${cmd.destination}`,
-                  `Recommandé: ${best.durationMin} min${typeof best.distanceKm === 'number' ? ` (${best.distanceKm} km)` : ''}`,
-                  alts.length
-                    ? `Alternatives: ${alts.map((a) => `${a.durationMin} min${typeof a.distanceKm === 'number' ? ` (${a.distanceKm} km)` : ''}`).join(', ')}`
+                  requestedModeLabel ? `Mode demandé: ${requestedModeLabel}` : undefined,
+                  exploredModes.length ? `Modes explorés: ${exploredModes.join(', ')}` : undefined,
+                  `Itinéraires analysés: ${res.routes.length}`,
+                  `Recommandé: ${formatRouteVariant(best)}`,
+                  alternatives.length
+                    ? `Alternatives: ${alternatives.map((variant) => formatRouteVariant(variant)).join(', ')}`
                     : undefined,
                 ].filter(Boolean).join('\n');
 
