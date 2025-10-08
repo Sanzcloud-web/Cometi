@@ -158,7 +158,9 @@ export function useConversation() {
   // No JSON formatting; we stream and render plain text directly.
 
   function parseRouteCommand(text: string): { origin?: string; destination?: string; options?: string } | null {
-    const m = text.match(/<ROUTE\b([^>]*)\/>/i);
+    // Normalize typographic quotes to straight quotes
+    const normalized = text.replace(/[“”]/g, '"').replace(/[‘’]/g, '"');
+    const m = normalized.match(/<ROUTE\b([^>]*)\/>/i);
     if (!m) return null;
     const attrs = m[1] ?? '';
     const getAttr = (name: string) => {
@@ -233,8 +235,17 @@ export function useConversation() {
   const getRouteModeLabel = (route: RouteVariant): string | undefined =>
     route.modeLabel || (route.mode && ROUTE_MODE_LABELS[route.mode as RouteModeKey]) || route.mode || undefined;
 
+  function formatMinutes(mins: number): string {
+    const m = Math.round(mins);
+    const h = Math.floor(m / 60);
+    const r = m % 60;
+    if (h > 0 && r === 0) return `${h} h`;
+    if (h > 0) return `${h} h ${r} min`;
+    return `${r} min`;
+  }
+
   const formatRouteVariant = (route: RouteVariant): string => {
-    const base = `${route.durationMin} min${
+    const base = `${formatMinutes(route.durationMin)}${
       typeof route.distanceKm === 'number' ? ` (${route.distanceKm} km)` : ''
     }`;
     const modeLabel = getRouteModeLabel(route);
@@ -407,7 +418,7 @@ export function useConversation() {
             (async () => {
               try {
                 updateAssistantMessage(placeholderId, 'Calcul de l\'itinéraire…', { isLoading: true });
-                const requestedMode = inferRouteMode(cmd, content);
+                const requestedMode = inferRouteMode(cmd, content) ?? 'driving';
                 const res = await computeFastestRouteViaBackground({
                   origin: cmd.origin!,
                   destination: cmd.destination!,
@@ -442,8 +453,16 @@ export function useConversation() {
                 ].filter(Boolean).join('\n');
 
                 const streamingMessages: ChromeChatMessage[] = [
-                  SYSTEM_PROMPT,
-                  { role: 'system', content: 'Voici des résultats d\'itinéraires extraits. Rédige une réponse claire en français qui explique le meilleur trajet et alternatives, de façon concise.' },
+                  {
+                    role: 'system',
+                    content: [
+                      'Tu es Cometi. Rédige UNIQUEMENT la réponse finale en français, claire et concise.',
+                      'N\'écris PAS de balises <ROUTE> ni de code. Pas de bloc de code.',
+                      'Formate les durées en heures/min (ex.: 163 → 2 h 43 min).',
+                      'N\'invente pas d\'alternatives et n\'affiche pas d\'options identiques (même durée et distance).',
+                      'Si l\'utilisateur a demandé la voiture, ignore train/avion/transports collectifs dans la réponse, même si présents dans les données.'
+                    ].join('\n')
+                  },
                   { role: 'system', content: facts },
                   { role: 'user', content },
                 ];
@@ -466,11 +485,15 @@ export function useConversation() {
             })();
             return;
           }
-          if (first) {
-            first = false;
-            updateAssistantMessage(placeholderId, acc, { isLoading: false });
-          } else {
-            updateAssistantMessage(placeholderId, acc);
+          // Do not show the raw <ROUTE .../> tag to the user
+          const accNorm = acc.replace(/[“”‘’]/g, '"');
+          if (!/\<ROUTE\b/i.test(accNorm)) {
+            if (first) {
+              first = false;
+              updateAssistantMessage(placeholderId, acc, { isLoading: false });
+            } else {
+              updateAssistantMessage(placeholderId, acc);
+            }
           }
         }).then((finalText) => {
           if (!routeHandled) {
