@@ -42,6 +42,13 @@ function sendJson(res: ServerResponse, status: number, body: unknown) {
   res.end(json);
 }
 
+const shouldPersistAssistant = (text: string | null | undefined) => {
+  const trimmed = text?.trim() ?? '';
+  if (!trimmed) return false;
+  if (/^<\s*ROUTE\b/i.test(trimmed)) return false;
+  return true;
+};
+
 const server = createServer(async (req, res) => {
   if (!req.url) {
     res.statusCode = 400;
@@ -135,6 +142,43 @@ const server = createServer(async (req, res) => {
   }
 
   // Chat history endpoints
+  const segments = url.pathname.split('/').filter(Boolean);
+  if (segments.length === 4 && segments[0] === 'api' && segments[1] === 'chats' && segments[3] === 'messages') {
+    const chatId = segments[2];
+    if (!chatId) {
+      sendJson(res, 400, { error: 'Identifiant de chat manquant.' });
+      return;
+    }
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { error: 'Méthode non autorisée.' });
+      return;
+    }
+    try {
+      const rawBody = await readBody(req);
+      const payload = rawBody.length > 0 ? (JSON.parse(rawBody) as { role?: string; content?: string }) : undefined;
+      const role = payload?.role;
+      const content = payload?.content ?? '';
+      if (role !== 'assistant' && role !== 'user') {
+        sendJson(res, 400, { error: 'Rôle de message invalide.' });
+        return;
+      }
+      if (!content || !content.trim()) {
+        sendJson(res, 400, { error: 'Contenu vide.' });
+        return;
+      }
+      if (role === 'user') {
+        await appendUserMessage(chatId, content);
+      } else if (shouldPersistAssistant(content)) {
+        await appendAssistantMessage(chatId, content);
+      }
+      sendJson(res, 200, { ok: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erreur lors de la sauvegarde du message.';
+      sendJson(res, 500, { error: message });
+    }
+    return;
+  }
+
   if (url.pathname === '/api/chats') {
     if (req.method === 'GET') {
       try {
@@ -289,7 +333,7 @@ const server = createServer(async (req, res) => {
                     if (lastUser?.content) {
                       await appendUserMessage(p.chatId, lastUser.content);
                     }
-                    if (full.trim().length > 0) {
+                    if (shouldPersistAssistant(full)) {
                       await appendAssistantMessage(p.chatId, full);
                     }
                   }
@@ -326,7 +370,7 @@ const server = createServer(async (req, res) => {
           if (lastUser?.content) {
             await appendUserMessage(p.chatId, lastUser.content);
           }
-          if (full.trim().length > 0) {
+          if (shouldPersistAssistant(full)) {
             await appendAssistantMessage(p.chatId, full);
           }
         }

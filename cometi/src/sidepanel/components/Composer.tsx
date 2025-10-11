@@ -205,7 +205,7 @@ export function Composer({
             aria-label="Envoyer le message"
             disabled={isSubmitting || draft.trim().length === 0}
             variant="brand"
-            className="h-10 w-10 rounded-full"
+            className="h-10 w-10 rounded-xl"
           >
             <ArrowRightIcon className="h-5 w-5" />
           </Button>

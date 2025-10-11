@@ -4,7 +4,7 @@ import { requestResumeSummaryStream } from '../services/resumeStream';
 import { requestPageAnswerStream, requestResumeContext } from '../services/pageAnswerStream';
 import type { ChromeChatMessage, ConversationMessage, MessageAction } from '../types/chat';
 import { MARKDOWN_GUIDELINES_FR } from '../../shared/markdownGuidelines';
-import { createChat as apiCreateChat, listChats as apiListChats, loadChat as apiLoadChat, type ChatSummary } from '../services/historyClient';
+import { createChat as apiCreateChat, listChats as apiListChats, loadChat as apiLoadChat, appendAssistantHistoryMessage as apiAppendAssistantMessage, type ChatSummary } from '../services/historyClient';
 import { computeFastestRouteViaBackground, type RouteVariant } from '../services/routeAgent';
 
 const SYSTEM_PROMPT: ChromeChatMessage = {
@@ -493,7 +493,7 @@ export function useConversation() {
 
                 let out = '';
                 let firstChunk = true;
-                await requestChatCompletionStream(streamingMessages, (delta) => {
+                const finalAnswer = await requestChatCompletionStream(streamingMessages, (delta) => {
                   out += delta;
                   if (firstChunk) {
                     firstChunk = false;
@@ -502,6 +502,15 @@ export function useConversation() {
                     updateAssistantMessage(placeholderId, out);
                   }
                 });
+                const trimmedFinal = (finalAnswer ?? out).trim();
+                if (trimmedFinal.length > 0 && chatId) {
+                  try {
+                    await apiAppendAssistantMessage(chatId, trimmedFinal);
+                    void refreshChats();
+                  } catch (persistError) {
+                    console.warn('[Cometi] Impossible de sauvegarder la réponse calculée :', persistError);
+                  }
+                }
               } catch (err: unknown) {
                 const msg = err instanceof Error ? err.message : 'Échec du calcul de trajet.';
                 updateAssistantMessage(placeholderId, msg, { isError: true });

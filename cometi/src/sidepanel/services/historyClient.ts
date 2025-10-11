@@ -54,3 +54,16 @@ export async function loadChat(chatId: string): Promise<{ id: string; title: str
       .map((m) => ({ id: m.id, role: m.role as any, text: m.content, createdAt: m.createdAt })),
   };
 }
+
+export async function appendAssistantHistoryMessage(chatId: string, content: string): Promise<void> {
+  if (!API_BASE) return;
+  const body = JSON.stringify({ role: 'assistant', content });
+  const res = await fetch(`${API_BASE}/chats/${encodeURIComponent(chatId)}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+  });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+}

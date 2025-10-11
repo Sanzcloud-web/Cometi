@@ -243,6 +243,114 @@ async function computeFastestRoute(payload: { origin: string; destination: strin
     mode: payload.mode ?? null,
   });
 
+  const isGoogleMapsUrl = (url?: string | null) => {
+    if (typeof url !== 'string') return false;
+    try {
+      const parsed = new URL(url);
+      if (!/google\.[^/]+$/i.test(parsed.hostname)) return false;
+      return parsed.pathname.includes('/maps');
+    } catch {
+      return false;
+    }
+  };
+
+  const matchesDirectionsUrl = (url?: string | null) => {
+    if (typeof url !== 'string') return false;
+    return url.includes('/maps/dir/');
+  };
+
+  const computeWaitBudgetMs = (loadDurationMs?: number | null) => {
+    const base = typeof loadDurationMs === 'number' && Number.isFinite(loadDurationMs) ? Math.max(loadDurationMs, 4000) : 9000;
+    const scaled = Math.round(base * 2.2);
+    return Math.min(90000, Math.max(12000, scaled));
+  };
+
+  async function waitForTabNavigation(tabId: number, expectedUrl: string, timeoutMs = 90000): Promise<number> {
+    const start = Date.now();
+    const urlMatches = (url?: string | null) => matchesDirectionsUrl(url) || (typeof url === 'string' && url.startsWith(expectedUrl));
+    return new Promise((resolve) => {
+      let resolved = false;
+      let settleTimeout: ReturnType<typeof setTimeout> | null = null;
+      let poller: ReturnType<typeof setInterval> | null = null;
+
+      const cleanup = () => {
+        if (settleTimeout) {
+          clearTimeout(settleTimeout);
+          settleTimeout = null;
+        }
+        if (poller) {
+          clearInterval(poller);
+          poller = null;
+        }
+        chrome.tabs.onUpdated.removeListener(listener);
+      };
+
+      const finalize = () => {
+        if (resolved) return;
+        resolved = true;
+        cleanup();
+        resolve(Date.now() - start);
+      };
+
+      const scheduleFinalize = () => {
+        if (resolved) return;
+        const elapsed = Date.now() - start;
+        const delay = Math.min(2000, Math.max(400, Math.round(elapsed * 0.2)));
+        if (settleTimeout) {
+          clearTimeout(settleTimeout);
+        }
+        settleTimeout = setTimeout(finalize, delay);
+      };
+
+      const listener = (updatedTabId: number, info: chrome.tabs.TabChangeInfo, updatedTab: chrome.tabs.Tab) => {
+        if (updatedTabId !== tabId) return;
+        if (info.status === 'complete' && urlMatches(updatedTab.url)) {
+          scheduleFinalize();
+          return;
+        }
+        if (info.url && urlMatches(info.url)) {
+          scheduleFinalize();
+        }
+      };
+      chrome.tabs.onUpdated.addListener(listener);
+
+      poller = setInterval(async () => {
+        try {
+          const tinfo = await chrome.tabs.get(tabId);
+          if (tinfo.status === 'complete' && urlMatches(tinfo.url)) {
+            scheduleFinalize();
+          }
+        } catch {
+          // Ignore transient navigation errors.
+        }
+        if (Date.now() - start > timeoutMs) {
+          finalize();
+        }
+      }, 350);
+    });
+  }
+
+  async function ensureDirectionsTab(dirUrl: string, currentTabId?: number): Promise<{ tabId: number; loadMs: number; reused: boolean }> {
+    if (typeof currentTabId === 'number') {
+      try {
+        const current = await chrome.tabs.get(currentTabId);
+        if (isGoogleMapsUrl(current.url)) {
+          await chrome.tabs.update(currentTabId, { url: dirUrl, active: true });
+          const loadMs = await waitForTabNavigation(currentTabId, dirUrl);
+          return { tabId: currentTabId, loadMs, reused: true };
+        }
+      } catch {
+        // Ignore and fallback to creating a fresh tab.
+      }
+    }
+    const created = await chrome.tabs.create({ url: dirUrl, active: true });
+    if (typeof created.id !== 'number') {
+      throw new Error("Impossible de créer l'onglet Google Maps.");
+    }
+    const loadMs = await waitForTabNavigation(created.id, dirUrl);
+    return { tabId: created.id, loadMs, reused: false };
+  }
+
   // 0) If a URL is provided by the LLM, navigate to it directly; else build from origin/destination/mode
   const normalizeTravelMode = (raw?: string | null): string | null => {
     if (!raw) return null;
@@ -255,6 +363,9 @@ async function computeFastestRoute(payload: { origin: string; destination: strin
     return null;
   };
 
+  let targetTabId = typeof tab.id === 'number' ? tab.id : undefined;
+  let extractionWaitBudgetMs = 22000;
+
   {
     const enc = (s: string) => encodeURIComponent(String(s ?? '').trim());
     const travelModeParam = normalizeTravelMode(payload.mode ?? null);
@@ -265,108 +376,481 @@ async function computeFastestRoute(payload: { origin: string; destination: strin
           return travelModeParam ? `${base}&travelmode=${encodeURIComponent(travelModeParam)}` : base;
         })();
     try {
-      const tab2 = await getActiveHttpTab();
-      if (typeof tab2.id === 'number') {
-        await chrome.tabs.update(tab2.id, { url: dirUrl });
-        // wait until complete
-        await new Promise<void>((resolve) => {
-          const started = Date.now();
-          const max = 60000;
-          const listener = (updatedTabId: number, info: chrome.tabs.TabChangeInfo, updatedTab: chrome.tabs.Tab) => {
-            if (updatedTabId !== tab2.id) return;
-            if (info.status === 'complete' && typeof updatedTab.url === 'string' && updatedTab.url.includes('/maps/dir/')) {
-              chrome.tabs.onUpdated.removeListener(listener);
-              resolve();
+      const navigationStart = Date.now();
+      const dirTab = await ensureDirectionsTab(dirUrl, targetTabId);
+      targetTabId = dirTab.tabId;
+      const loadMs = dirTab.loadMs ?? Date.now() - navigationStart;
+      extractionWaitBudgetMs = computeWaitBudgetMs(loadMs);
+      const [{ result: re }] = await chrome.scripting.executeScript({
+        target: { tabId: dirTab.tabId },
+        world: 'MAIN',
+        args: [extractionWaitBudgetMs],
+        func: async (maxWaitBudgetMsRaw: number) => {
+          const defaultWaitBudget = typeof maxWaitBudgetMsRaw === 'number' && Number.isFinite(maxWaitBudgetMsRaw)
+            ? Math.min(90000, Math.max(12000, maxWaitBudgetMsRaw))
+            : 22000;
+          const chooseWaitBudget = (requested?: number) => {
+            const cap = 12000;
+            if (typeof requested === 'number' && Number.isFinite(requested)) {
+              const normalized = Math.max(0, requested);
+              return Math.max(defaultWaitBudget, Math.min(normalized, defaultWaitBudget + cap));
+            }
+            return defaultWaitBudget;
+          };
+
+          function textCompact(s?: string | null, max = 200): string | undefined {
+            if (!s) return undefined;
+            const v = s.replace(/\s+/g, ' ').trim();
+            return v.length ? v.slice(0, max) : undefined;
+          }
+          function parseDuration(text: string): number | undefined {
+            const t = text.toLowerCase();
+            let m = t.match(/(\d+)\s*h\s*(\d+)\s*min/);
+            if (m) return parseInt(m[1]) * 60 + parseInt(m[2]);
+            m = t.match(/(\d+)\s*h(?!\w)/);
+            if (m) return parseInt(m[1]) * 60;
+            m = t.match(/(\d+)\s*min/);
+            if (m) return parseInt(m[1]);
+            return undefined;
+          }
+          function parseDistance(text: string): number | undefined {
+            const m = text.toLowerCase().match(/(\d+[\.,]?\d*)\s*km/);
+            if (m) return parseFloat(m[1].replace(',', '.'));
+            return undefined;
+          }
+
+          const ensureNetworkCollectors = () => {
+            const globalAny = window as Record<string, unknown>;
+            if (typeof globalAny.__cometiEnsureRouteWatchers !== 'function' || typeof globalAny.__cometiReadRouteVariants !== 'function') {
+              const NET_STATE_KEY = '__cometiRouteNetState';
+              const NET_HOOK_KEY = '__cometiRouteNetHook';
+
+              type SharedRouteSnapshot = {
+                durationSec: number;
+                durationText?: string;
+                distanceMeters?: number;
+                distanceText?: string;
+              };
+
+              const storeRoutes = (input: SharedRouteSnapshot[]) => {
+                if (!Array.isArray(input) || input.length === 0) return;
+                const byKey = new Map<string, SharedRouteSnapshot>();
+                for (const item of input) {
+                  if (!item || typeof item.durationSec !== 'number' || !Number.isFinite(item.durationSec) || item.durationSec <= 0) continue;
+                  const key = `${Math.round(item.durationSec)}|${Math.round(item.distanceMeters ?? 0)}`;
+                  if (!byKey.has(key)) byKey.set(key, item);
+                }
+                if (byKey.size === 0) return;
+                try {
+                  (globalAny as any)[NET_STATE_KEY] = {
+                    timestamp: Date.now(),
+                    routes: Array.from(byKey.values()),
+                  };
+                  window.dispatchEvent(new CustomEvent('cometi:routes-updated'));
+                } catch {
+                  // ignore
+                }
+              };
+
+              const parsePayload = (raw: string): SharedRouteSnapshot[] => {
+                if (typeof raw !== 'string' || raw.trim().length === 0) return [];
+                let textPayload = raw.trim();
+                if (textPayload.startsWith(")]}'")) {
+                  const newlineIndex = textPayload.indexOf('\n');
+                  textPayload = newlineIndex >= 0 ? textPayload.slice(newlineIndex + 1) : '';
+                }
+
+                const routes: SharedRouteSnapshot[] = [];
+                const addRoute = (durationSec?: number, durationText?: string, distanceMeters?: number, distanceText?: string) => {
+                  if (typeof durationSec !== 'number' || !Number.isFinite(durationSec) || durationSec <= 0) return;
+                  routes.push({ durationSec, durationText, distanceMeters, distanceText });
+                };
+
+                const maybeJson = (() => {
+                  try {
+                    return JSON.parse(textPayload);
+                  } catch {
+                    return undefined;
+                  }
+                })();
+
+                if (maybeJson) {
+                  const visit = (node: unknown) => {
+                    if (Array.isArray(node)) {
+                      for (const child of node) visit(child);
+                      return;
+                    }
+                    if (node && typeof node === 'object') {
+                      const record = node as Record<string, unknown>;
+                      const durationObj = record.duration ?? record.duration_in_traffic;
+                      const distanceObj = record.distance ?? record.fallbackDistance;
+                      const durationValue = durationObj ? Number((durationObj as any).value) : undefined;
+                      const durationLabel = typeof (durationObj as any)?.text === 'string' ? (durationObj as any).text : undefined;
+                      const distanceValue = distanceObj ? Number((distanceObj as any).value) : undefined;
+                      const distanceLabel = typeof (distanceObj as any)?.text === 'string' ? (distanceObj as any).text : undefined;
+                      if (Number.isFinite(durationValue)) {
+                        addRoute(durationValue, durationLabel, Number.isFinite(distanceValue) ? distanceValue : undefined, distanceLabel);
+                      }
+                      Object.values(record).forEach((value: unknown) => {
+                        if (value && typeof value === 'object') visit(value);
+                      });
+                    }
+                  };
+                  visit(maybeJson);
+                }
+
+                if (!routes.length) {
+                  const durationRegex = /"duration"\s*:\s*{[^}]*"value"\s*:\s*(\d+)[^}]*"text"\s*:\s*"([^"]+)"/g;
+                  const distanceRegex = /"distance"\s*:\s*{[^}]*"value"\s*:\s*(\d+)[^}]*"text"\s*:\s*"([^"]+)"/g;
+                  const durationEntries: Array<{ value: number; text?: string }> = [];
+                  let match: RegExpExecArray | null;
+                  while ((match = durationRegex.exec(textPayload))) {
+                    durationEntries.push({ value: Number(match[1]), text: match[2] });
+                  }
+                  const distanceEntries: Array<{ value: number; text?: string }> = [];
+                  while ((match = distanceRegex.exec(textPayload))) {
+                    distanceEntries.push({ value: Number(match[1]), text: match[2] });
+                  }
+                  const fallbackDistance = distanceEntries[distanceEntries.length - 1];
+                  durationEntries.forEach((entry, index) => {
+                    const distanceEntry = distanceEntries[index] ?? fallbackDistance;
+                    addRoute(entry.value, entry.text, distanceEntry ? distanceEntry.value : undefined, distanceEntry ? distanceEntry.text : undefined);
+                  });
+                }
+
+                return routes;
+              };
+
+              const capturePayload = (url: string, payloadText: string) => {
+                if (typeof url !== 'string' || typeof payloadText !== 'string') return;
+                if (!/directions/i.test(url)) return;
+                const parsed = parsePayload(payloadText);
+                if (parsed.length) storeRoutes(parsed);
+              };
+
+              const installWatchers = () => {
+                if ((globalAny as any)[NET_HOOK_KEY]) return;
+                (globalAny as any)[NET_HOOK_KEY] = true;
+                const originalFetch = window.fetch;
+                window.fetch = async function (...fetchArgs: Parameters<typeof fetch>): Promise<Response> {
+                  const response = await originalFetch.apply(this, fetchArgs);
+                  try {
+                    const request = fetchArgs[0];
+                    const requestUrl = typeof request === 'string' ? request : request instanceof Request ? request.url : '';
+                    if (requestUrl && /directions/i.test(requestUrl)) {
+                      void response.clone().text().then((payload) => {
+                        capturePayload(requestUrl, payload);
+                      }).catch(() => {});
+                    }
+                  } catch {
+                    // ignore
+                  }
+                  return response;
+                };
+
+                const originalOpen = XMLHttpRequest.prototype.open;
+                const originalSend = XMLHttpRequest.prototype.send;
+
+                XMLHttpRequest.prototype.open = function (method: string, url: string | URL, ...rest: unknown[]) {
+                  try {
+                    (this as any).__cometiRouteUrl = typeof url === 'string' ? url : url?.toString() ?? '';
+                  } catch {
+                    (this as any).__cometiRouteUrl = '';
+                  }
+                  return originalOpen.apply(this, [method, url, ...rest] as any);
+                };
+
+                XMLHttpRequest.prototype.send = function (body?: Document | BodyInit | null) {
+                  try {
+                    const targetUrl = String((this as any).__cometiRouteUrl ?? '');
+                    if (targetUrl && /directions/i.test(targetUrl)) {
+                      this.addEventListener('load', () => {
+                        try {
+                          if (typeof this.responseText === 'string') {
+                            capturePayload(targetUrl, this.responseText);
+                          }
+                        } catch {
+                          // ignore
+                        }
+                      });
+                    }
+                  } catch {
+                    // ignore
+                  }
+                  return originalSend.apply(this, [body] as any);
+                };
+              };
+
+              (globalAny as any).__cometiEnsureRouteWatchers = installWatchers;
+              (globalAny as any).__cometiReadRouteVariants = () => {
+                try {
+                  const state = (globalAny as any)[NET_STATE_KEY];
+                  if (!state || typeof state !== 'object') return [];
+                  if (Date.now() - (state.timestamp ?? 0) > 15000) return [];
+                  const list = Array.isArray(state.routes) ? state.routes : [];
+                  return list
+                    .map((route: SharedRouteSnapshot | undefined) => {
+                      if (!route || typeof route.durationSec !== 'number' || !Number.isFinite(route.durationSec) || route.durationSec <= 0) return undefined;
+                      const durationMin = Math.max(1, Math.round(route.durationSec / 60));
+                      const distanceMeters = Number(route.distanceMeters);
+                      const distanceKm = Number.isFinite(distanceMeters) ? Math.round((distanceMeters / 1000) * 100) / 100 : undefined;
+                      const text = typeof route.durationText === 'string' ? route.durationText : undefined;
+                      return { durationMin, distanceKm, text };
+                    })
+                    .filter((value): value is { durationMin: number; distanceKm?: number; text?: string } => Boolean(value));
+                } catch {
+                  return [] as { durationMin: number; distanceKm?: number; text?: string }[];
+                }
+              };
+
+              try {
+                const installer = (globalAny as any).__cometiEnsureRouteWatchers;
+                if (typeof installer === 'function') installer();
+              } catch {
+                // ignore
+              }
+            } else {
+              try {
+                const installer = (globalAny as any).__cometiEnsureRouteWatchers;
+                if (typeof installer === 'function') installer();
+              } catch {
+                // ignore
+              }
             }
           };
-          chrome.tabs.onUpdated.addListener(listener);
-          const tick = setInterval(async () => {
+
+          const readNetworkRoutes = (): { durationMin: number; distanceKm?: number; text?: string }[] => {
             try {
-              const tinfo = await chrome.tabs.get(tab2.id!);
-              if (tinfo.status === 'complete' && typeof tinfo.url === 'string' && tinfo.url.includes('/maps/dir/')) {
-                chrome.tabs.onUpdated.removeListener(listener);
-                clearInterval(tick);
-                resolve();
+              const reader = (window as any).__cometiReadRouteVariants;
+              if (typeof reader === 'function') {
+                const value = reader();
+                if (Array.isArray(value)) return value;
               }
-            } catch {}
-            if (Date.now() - started > max) {
-              chrome.tabs.onUpdated.removeListener(listener);
-              clearInterval(tick);
-              resolve();
+            } catch {
+              // ignore
             }
-          }, 400);
-        });
-        // Lightweight extraction after direct navigation
-        const [{ result: re }] = await chrome.scripting.executeScript({
-          target: { tabId: tab2.id },
-          world: 'MAIN',
-          func: async () => {
-            function textCompact(s?: string | null, max = 200): string | undefined {
-              if (!s) return undefined;
-              const v = s.replace(/\s+/g, ' ').trim();
-              return v.length ? v.slice(0, max) : undefined;
+            return [];
+          };
+
+          ensureNetworkCollectors();
+          if (typeof (window as any).__cometiEnsureRouteWatchers !== 'function') {
+            (window as any).__cometiEnsureRouteWatchers = ensureNetworkWatchers;
+          }
+          if (typeof (window as any).__cometiReadRouteVariants !== 'function') {
+            (window as any).__cometiReadRouteVariants = readNetworkRoutes;
+          }
+
+          const durationPattern = /((\d+\s*h\s*\d+\s*min)|(\d+\s*h(?!\w))|(\d+\s*min))/i;
+
+          const gatherTexts = (element?: Element | null, max = 260): string[] => {
+            if (!element) return [];
+            const list: string[] = [];
+            const push = (value?: string | null, limit = max) => {
+              const normalized = textCompact(value, limit);
+              if (normalized && !list.includes(normalized)) list.push(normalized);
+            };
+            if (element instanceof HTMLElement) {
+              push(element.innerText, 320);
+              push(element.getAttribute('aria-label'), 220);
+              push(element.getAttribute('title'), 220);
+              for (const attr of Array.from(element.attributes)) {
+                if (attr.name.startsWith('data-')) push(attr.value, 200);
+              }
+            } else {
+              push(element.textContent, 320);
             }
-            function parseDuration(text: string): number | undefined {
-              const t = text.toLowerCase();
-              let m = t.match(/(\d+)\s*h\s*(\d+)\s*min/);
-              if (m) return parseInt(m[1]) * 60 + parseInt(m[2]);
-              m = t.match(/(\d+)\s*h(?!\w)/);
-              if (m) return parseInt(m[1]) * 60;
-              m = t.match(/(\d+)\s*min/);
-              if (m) return parseInt(m[1]);
-              return undefined;
+            return list;
+          };
+
+          const pickDuration = (texts: string[]): number | undefined => {
+            for (const text of texts) {
+              const dur = parseDuration(text);
+              if (typeof dur === 'number') return dur;
             }
-            function parseDistance(text: string): number | undefined {
-              const m = text.toLowerCase().match(/(\d+[\.,]?\d*)\s*km/);
-              if (m) return parseFloat(m[1].replace(',', '.'));
-              return undefined;
+            return undefined;
+          };
+
+          const pickDistance = (texts: string[]): number | undefined => {
+            for (const text of texts) {
+              const dist = parseDistance(text);
+              if (typeof dist === 'number') return dist;
             }
-            function extractRoutes(): { durationMin: number; distanceKm?: number; text?: string }[] {
-              const results: { durationMin: number; distanceKm?: number; text?: string }[] = [];
-              const nodes = Array.from(document.querySelectorAll('*')) as HTMLElement[];
-              for (const el of nodes) {
-                const txt = textCompact(el.innerText, 300);
-                if (!txt) continue;
-                if (!/(\d+\s*h\s*\d+\s*min|\d+\s*min)/i.test(txt)) continue;
-                const dur = parseDuration(txt);
-                let dist = parseDistance(txt);
-                if (typeof dist !== 'number' && el.parentElement) {
-                  const pTxt = textCompact(el.parentElement.innerText, 300) || '';
-                  dist = parseDistance(pTxt);
+            return undefined;
+          };
+
+          function extractRoutes(): { durationMin: number; distanceKm?: number; text?: string }[] {
+            const results: { durationMin: number; distanceKm?: number; text?: string }[] = [...readNetworkRoutes()];
+            const seenFromNetwork = new Set(results.map((item) => `${item.durationMin}|${item.distanceKm ?? ''}`));
+            const nodes = Array.from(document.querySelectorAll('*')) as HTMLElement[];
+            const seenPairs = new Set<string>();
+            for (const el of nodes) {
+              const texts: string[] = [];
+              const merge = (src: Element | null | undefined, max = 260) => {
+                if (!src) return;
+                for (const entry of gatherTexts(src, max)) {
+                  if (!texts.includes(entry)) texts.push(entry);
                 }
-                if (!dur) continue;
-                results.push({ durationMin: dur, distanceKm: dist, text: txt });
+              };
+              merge(el, 320);
+              merge(el.parentElement, 260);
+              merge(el.previousElementSibling, 200);
+              merge(el.nextElementSibling, 200);
+              if (texts.length === 0) continue;
+              const combined = texts.join(' • ');
+              if (!durationPattern.test(combined)) continue;
+              const dur = pickDuration(texts);
+              if (typeof dur !== 'number') continue;
+              let dist = pickDistance(texts);
+              if (typeof dist !== 'number' && el.parentElement) {
+                dist = pickDistance(gatherTexts(el.parentElement, 260));
               }
-              const seen = new Set<string>();
-              const uniq = [] as { durationMin: number; distanceKm?: number; text?: string }[];
-              for (const r of results.sort((a, b) => a.durationMin - b.durationMin)) {
-                const key = `${r.durationMin}|${r.distanceKm ?? ''}`;
-                if (seen.has(key)) continue;
-                seen.add(key);
-                uniq.push(r);
-                if (uniq.length >= 5) break;
-              }
-              return uniq;
+              const distanceKm = typeof dist === 'number' ? Math.round(dist * 100) / 100 : undefined;
+              const sample = texts[0] ?? combined;
+              const durationMin = Math.max(1, Math.round(dur));
+              const dedupKey = `${durationMin}|${distanceKm ?? ''}`;
+              if (seenPairs.has(dedupKey)) continue;
+              seenPairs.add(dedupKey);
+              if (seenFromNetwork.has(dedupKey)) continue;
+              results.push({ durationMin, distanceKm, text: sample });
+              if (results.length >= 20) break;
             }
-            await new Promise((res) => setTimeout(res, 600));
-            const routes = extractRoutes();
-            const best = routes[0] ?? null;
-            return { routes, best, pageUrl: window.location.href };
-          },
-        });
-        await logToBackend('route', 'info', 'done', { pageUrl: re?.pageUrl, routes: re?.routes?.length ?? 0, best: re?.best });
-        return re ?? { routes: [], best: null };
-      }
-    } catch {}
+            const dedup: { durationMin: number; distanceKm?: number; text?: string }[] = [];
+            const seen = new Set<string>();
+            for (const route of results.sort((a, b) => a.durationMin - b.durationMin)) {
+              const key = `${route.durationMin}|${route.distanceKm ?? ''}`;
+              if (seen.has(key)) continue;
+              seen.add(key);
+              dedup.push(route);
+              if (dedup.length >= 5) break;
+            }
+            return dedup;
+          }
+          async function waitForRoutesUntil(
+            extract: () => { durationMin: number; distanceKm?: number; text?: string }[],
+            maxWaitMs?: number
+          ): Promise<void> {
+            const limit = chooseWaitBudget(maxWaitMs);
+            const start = Date.now();
+            let lastCount = 0;
+            let lastStableAt = start;
+            return new Promise((resolve) => {
+              let settled = false;
+              let timeoutId: ReturnType<typeof setTimeout> | undefined;
+              let pollerId: ReturnType<typeof setInterval> | undefined;
+              let observer: MutationObserver | undefined;
+              let listener: ((event: Event) => void) | undefined;
+
+              const cleanup = () => {
+                if (observer) {
+                  observer.disconnect();
+                  observer = undefined;
+                }
+                if (timeoutId) {
+                  clearTimeout(timeoutId);
+                  timeoutId = undefined;
+                }
+                if (pollerId) {
+                  clearInterval(pollerId);
+                  pollerId = undefined;
+                }
+                if (listener) {
+                  window.removeEventListener('cometi:routes-updated', listener);
+                  listener = undefined;
+                }
+              };
+
+              const finish = () => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                resolve();
+              };
+
+              const check = () => {
+                if (settled) return;
+                const routes = extract();
+                const count = routes.length;
+                if (count !== lastCount) {
+                  lastCount = count;
+                  lastStableAt = Date.now();
+                }
+                if (count > 0 && Date.now() - lastStableAt >= 600) {
+                  finish();
+                  return;
+                }
+                if (Date.now() - start > limit) {
+                  finish();
+                }
+              };
+
+              try {
+                observer = new MutationObserver(() => {
+                  check();
+                });
+                observer.observe(document.body, { childList: true, subtree: true });
+              } catch {
+                observer = undefined;
+              }
+
+              pollerId = setInterval(check, 200);
+              listener = () => {
+                check();
+              };
+              window.addEventListener('cometi:routes-updated', listener);
+              timeoutId = setTimeout(finish, limit);
+              check();
+            });
+          }
+          await waitForRoutesUntil(extractRoutes, 32000);
+          const routes = extractRoutes();
+          const best = routes[0] ?? null;
+          return { routes, best, pageUrl: window.location.href };
+        },
+      });
+      await logToBackend('route', 'info', 'done', {
+        pageUrl: re?.pageUrl,
+        routes: re?.routes?.length ?? 0,
+        best: re?.best,
+        loadMs,
+        waitBudget: extractionWaitBudgetMs,
+        reusedTab: dirTab.reused,
+      });
+      return re ?? { routes: [], best: null };
+    } catch (error) {
+      await logToBackend('route', 'warn', 'direct_navigation_failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  const activeTargetTabId = targetTabId ?? tab.id;
+  if (typeof activeTargetTabId !== 'number') {
+    throw new Error("Impossible de déterminer l'onglet cible pour l'extraction de trajet.");
   }
 
   const [{ result }] = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
+    target: { tabId: activeTargetTabId },
     world: 'MAIN',
-    args: [payload.origin, payload.destination, payload.mode ?? null],
-    func: async (originValue: string, destinationValue: string, requestedMode: string | null) => {
+    args: [payload.origin, payload.destination, payload.mode ?? null, extractionWaitBudgetMs],
+    func: async (
+      originValue: string,
+      destinationValue: string,
+      requestedMode: string | null,
+      maxWaitBudgetMsRaw?: number
+    ) => {
       const dbg: any[] = [];
       const log = (msg: string, data?: any) => { dbg.push({ msg, data }); };
+      const defaultWaitBudget = typeof maxWaitBudgetMsRaw === 'number' && Number.isFinite(maxWaitBudgetMsRaw)
+        ? Math.min(90000, Math.max(12000, maxWaitBudgetMsRaw))
+        : 22000;
+      const chooseWaitBudget = (requested?: number) => {
+        const cap = 12000;
+        if (typeof requested === 'number' && Number.isFinite(requested)) {
+          const normalized = Math.max(0, requested);
+          return Math.max(defaultWaitBudget, Math.min(normalized, defaultWaitBudget + cap));
+        }
+        return defaultWaitBudget;
+      };
 
       type TravelMode = 'driving' | 'transit' | 'walking' | 'cycling';
       const MODE_CONFIG: Record<TravelMode, { label: string; keywords: string[] }> = {
@@ -565,7 +1049,7 @@ async function computeFastestRoute(payload: { origin: string; destination: strin
           button.click();
           await sleep(200);
         }
-        await waitForRoutesUntil(() => extractRoutes(mode, MODE_CONFIG[mode].label), 45000);
+        await waitForRoutesUntil(() => extractRoutes(mode, MODE_CONFIG[mode].label), 24000);
       }
 
       function scoreField(el: HTMLElement): number {
@@ -655,32 +1139,82 @@ async function computeFastestRoute(payload: { origin: string; destination: strin
         if (m) return parseFloat(m[1].replace(',', '.'));
         return undefined;
       }
+
+      ensureNetworkCollectors();
       async function waitForRoutesUntil(
         extract: () => { durationMin: number; distanceKm?: number; text?: string; mode?: string; modeLabel?: string }[],
-        maxWaitMs = 45000
+        maxWaitMs?: number
       ): Promise<void> {
+        const limit = chooseWaitBudget(maxWaitMs);
         const start = Date.now();
         let lastCount = 0;
-        let lastChange = Date.now();
+        let lastStableAt = start;
         return new Promise((resolve) => {
-          const loop = () => {
-            const count = extract().length;
+          let settled = false;
+          let timeoutId: ReturnType<typeof setTimeout> | undefined;
+          let pollerId: ReturnType<typeof setInterval> | undefined;
+          let observer: MutationObserver | undefined;
+          let listener: ((event: Event) => void) | undefined;
+
+          const cleanup = () => {
+            if (observer) {
+              observer.disconnect();
+              observer = undefined;
+            }
+            if (timeoutId) {
+              clearTimeout(timeoutId);
+              timeoutId = undefined;
+            }
+            if (pollerId) {
+              clearInterval(pollerId);
+              pollerId = undefined;
+            }
+            if (listener) {
+              window.removeEventListener('cometi:routes-updated', listener);
+              listener = undefined;
+            }
+          };
+
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            resolve();
+          };
+
+          const check = () => {
+            if (settled) return;
+            const routes = extract();
+            const count = routes.length;
             if (count !== lastCount) {
               lastCount = count;
-              lastChange = Date.now();
+              lastStableAt = Date.now();
             }
-            // If we have at least 1 route and stable for 1200ms, resolve
-            if (lastCount > 0 && Date.now() - lastChange > 1200) {
-              resolve();
+            if (count > 0 && Date.now() - lastStableAt >= 600) {
+              finish();
               return;
             }
-            if (Date.now() - start > maxWaitMs) {
-              resolve();
-              return;
+            if (Date.now() - start > limit) {
+              finish();
             }
-            setTimeout(loop, 300);
           };
-          loop();
+
+          try {
+            observer = new MutationObserver(() => {
+              check();
+            });
+            observer.observe(document.body, { childList: true, subtree: true });
+          } catch {
+            observer = undefined;
+          }
+
+          pollerId = setInterval(check, 200);
+          listener = () => {
+            check();
+          };
+          window.addEventListener('cometi:routes-updated', listener);
+          timeoutId = setTimeout(finish, limit);
+          check();
         });
       }
 
@@ -701,37 +1235,97 @@ async function computeFastestRoute(payload: { origin: string; destination: strin
         log('navigate_dir_url', { url, requestedMode });
         window.location.assign(url);
       }
+      const durationPattern = /((\d+\s*h\s*\d+\s*min)|(\d+\s*h(?!\w))|(\d+\s*min))/i;
+
+      const gatherTexts = (element?: Element | null, max = 260): string[] => {
+        if (!element) return [];
+        const list: string[] = [];
+        const push = (value?: string | null, limit = max) => {
+          const normalized = textCompact(value, limit);
+          if (normalized && !list.includes(normalized)) list.push(normalized);
+        };
+        if (element instanceof HTMLElement) {
+          push(element.innerText, 320);
+          push(element.getAttribute('aria-label'), 220);
+          push(element.getAttribute('title'), 220);
+          for (const attr of Array.from(element.attributes)) {
+            if (attr.name.startsWith('data-')) push(attr.value, 200);
+          }
+        } else {
+          push(element.textContent, 320);
+        }
+        return list;
+      };
+
+      const pickDuration = (texts: string[]): number | undefined => {
+        for (const text of texts) {
+          const dur = parseDuration(text);
+          if (typeof dur === 'number') return dur;
+        }
+        return undefined;
+      };
+
+      const pickDistance = (texts: string[]): number | undefined => {
+        for (const text of texts) {
+          const dist = parseDistance(text);
+          if (typeof dist === 'number') return dist;
+        }
+        return undefined;
+      };
+
       function extractRoutes(
         mode?: TravelMode,
         modeLabel?: string
       ): { durationMin: number; distanceKm?: number; text?: string; mode?: string; modeLabel?: string }[] {
-        const results: { durationMin: number; distanceKm?: number; text?: string }[] = [];
+        const base = readNetworkRoutes().map((item) => ({ ...item, mode, modeLabel }));
+        const seenKeys = new Set(base.map((item) => `${item.mode ?? 'default'}|${item.durationMin}|${item.distanceKm ?? ''}`));
         const nodes = Array.from(document.querySelectorAll('*')) as HTMLElement[];
+        const results: { durationMin: number; distanceKm?: number; text?: string; mode?: string; modeLabel?: string }[] = [...base];
+        const seenPairs = new Set<string>(base.map((item) => `${item.durationMin}|${item.distanceKm ?? ''}`));
         for (const el of nodes) {
-          const txt = textCompact(el.innerText, 300);
-          if (!txt) continue;
-          if (!/(\d+\s*h\s*\d+\s*min|\d+\s*min)/i.test(txt)) continue;
-          const dur = parseDuration(txt);
-          let dist = parseDistance(txt);
-          // Try parent text for distance if not present in same element
+          const texts: string[] = [];
+          const merge = (src: Element | null | undefined, max = 260) => {
+            if (!src) return;
+            for (const entry of gatherTexts(src, max)) {
+              if (!texts.includes(entry)) texts.push(entry);
+            }
+          };
+          merge(el, 320);
+          merge(el.parentElement, 260);
+          merge(el.previousElementSibling, 200);
+          merge(el.nextElementSibling, 200);
+          if (texts.length === 0) continue;
+          const combined = texts.join(' • ');
+          if (!durationPattern.test(combined)) continue;
+          const dur = pickDuration(texts);
+          if (typeof dur !== 'number') continue;
+          let dist = pickDistance(texts);
           if (typeof dist !== 'number' && el.parentElement) {
-            const pTxt = textCompact(el.parentElement.innerText, 300) || '';
-            dist = parseDistance(pTxt);
+            dist = pickDistance(gatherTexts(el.parentElement, 260));
           }
-          if (!dur) continue;
-          results.push({ durationMin: dur, distanceKm: dist, text: txt });
+          const distanceKm = typeof dist === 'number' ? Math.round(dist * 100) / 100 : undefined;
+          const durationMin = Math.max(1, Math.round(dur));
+          const key = `${durationMin}|${distanceKm ?? ''}`;
+          if (seenPairs.has(key)) continue;
+          seenPairs.add(key);
+          const sample = texts[0] ?? combined;
+          const route = { durationMin, distanceKm, text: sample, mode, modeLabel };
+          const signature = `${route.mode ?? 'default'}|${route.durationMin}|${route.distanceKm ?? ''}`;
+          if (seenKeys.has(signature)) continue;
+          results.push(route);
+          seenKeys.add(signature);
+          if (results.length >= 20) break;
         }
-        // Deduplicate by duration+distance and keep top 5 shortest
+        const dedup: { durationMin: number; distanceKm?: number; text?: string; mode?: string; modeLabel?: string }[] = [];
         const seen = new Set<string>();
-        const uniq = [] as { durationMin: number; distanceKm?: number; text?: string }[];
-        for (const r of results.sort((a, b) => a.durationMin - b.durationMin)) {
-          const key = `${r.durationMin}|${r.distanceKm ?? ''}`;
+        for (const route of results.sort((a, b) => a.durationMin - b.durationMin)) {
+          const key = `${route.mode ?? 'default'}|${route.durationMin}|${route.distanceKm ?? ''}`;
           if (seen.has(key)) continue;
           seen.add(key);
-          uniq.push(r);
-          if (uniq.length >= 5) break;
+          dedup.push(route);
+          if (dedup.length >= 5) break;
         }
-        return uniq.map((item) => ({ ...item, mode, modeLabel }));
+        return dedup;
       }
 
       // 0) Ensure directions panel if needed (click Directions button once)
@@ -769,12 +1363,12 @@ async function computeFastestRoute(payload: { origin: string; destination: strin
       if (getPrimaryRoutes().length === 0) {
         log('nudge_destination_enter');
         await pressEnter(b);
-        await waitForRoutesUntil(getPrimaryRoutes, 30000);
+        await waitForRoutesUntil(getPrimaryRoutes, 18000);
       }
       // If still nothing, hard navigate to Maps dir URL
       if (getPrimaryRoutes().length === 0) {
         await navigateToDir(originValue, destinationValue);
-        await waitForRoutesUntil(getPrimaryRoutes, 60000);
+        await waitForRoutesUntil(getPrimaryRoutes, 28000);
       }
 
       const aggregated: { durationMin: number; distanceKm?: number; text?: string; mode?: string; modeLabel?: string }[] = [];
@@ -804,7 +1398,7 @@ async function computeFastestRoute(payload: { origin: string; destination: strin
       if (requestedTravelMode) {
         await collectForMode(requestedTravelMode);
         if (aggregated.length < 3) {
-          await waitForRoutesUntil(() => extractRoutes(requestedTravelMode, MODE_CONFIG[requestedTravelMode].label), 30000);
+          await waitForRoutesUntil(() => extractRoutes(requestedTravelMode, MODE_CONFIG[requestedTravelMode].label), 20000);
           pushRoutes(extractRoutes(requestedTravelMode, MODE_CONFIG[requestedTravelMode].label));
         }
       } else {
@@ -836,7 +1430,8 @@ async function computeFastestRoute(payload: { origin: string; destination: strin
     await logToBackend('route', 'warn', 'no_routes');
     // Fallback: hard navigate via background then re-inject a lightweight extractor
     const tab2 = await getActiveHttpTab();
-    if (typeof tab2.id === 'number') {
+    const preferredTabId = typeof tab2.id === 'number' ? tab2.id : targetTabId;
+    if (typeof preferredTabId === 'number') {
       const enc = (s: string) => encodeURIComponent(String(s ?? '').trim());
       const raw = String(payload.mode ?? '').toLowerCase();
       let travelParam: string | null = null;
@@ -849,39 +1444,25 @@ async function computeFastestRoute(payload: { origin: string; destination: strin
       }
       const base = `https://www.google.com/maps/dir/?api=1&origin=${enc(payload.origin)}&destination=${enc(payload.destination)}`;
       const dirUrl = travelParam ? `${base}&travelmode=${encodeURIComponent(travelParam)}` : base;
-      await chrome.tabs.update(tab2.id, { url: dirUrl });
-      // wait until complete
-      await new Promise<void>((resolve) => {
-        const started = Date.now();
-        const max = 60000;
-        const listener = (updatedTabId: number, info: chrome.tabs.TabChangeInfo, updatedTab: chrome.tabs.Tab) => {
-          if (updatedTabId !== tab2.id) return;
-          if (info.status === 'complete' && typeof updatedTab.url === 'string' && updatedTab.url.includes('/maps/dir/')) {
-            chrome.tabs.onUpdated.removeListener(listener);
-            resolve();
-          }
-        };
-        chrome.tabs.onUpdated.addListener(listener);
-        const tick = setInterval(async () => {
-          try {
-            const tinfo = await chrome.tabs.get(tab2.id!);
-            if (tinfo.status === 'complete' && typeof tinfo.url === 'string' && tinfo.url.includes('/maps/dir/')) {
-              chrome.tabs.onUpdated.removeListener(listener);
-              clearInterval(tick);
-              resolve();
-            }
-          } catch {}
-          if (Date.now() - started > max) {
-            chrome.tabs.onUpdated.removeListener(listener);
-            clearInterval(tick);
-            resolve();
-          }
-        }, 400);
-      });
+      const dirTab = await ensureDirectionsTab(dirUrl, preferredTabId);
+      const fallbackWaitBudget = computeWaitBudgetMs(dirTab.loadMs);
       const [{ result: re }] = await chrome.scripting.executeScript({
-        target: { tabId: tab2.id },
+        target: { tabId: dirTab.tabId },
         world: 'MAIN',
-        func: async () => {
+        args: [fallbackWaitBudget],
+        func: async (maxWaitBudgetMsRaw?: number) => {
+          const defaultWaitBudget = typeof maxWaitBudgetMsRaw === 'number' && Number.isFinite(maxWaitBudgetMsRaw)
+            ? Math.min(90000, Math.max(12000, maxWaitBudgetMsRaw))
+            : 22000;
+          const chooseWaitBudget = (requested?: number) => {
+            const cap = 12000;
+            if (typeof requested === 'number' && Number.isFinite(requested)) {
+              const normalized = Math.max(0, requested);
+              return Math.max(defaultWaitBudget, Math.min(normalized, defaultWaitBudget + cap));
+            }
+            return defaultWaitBudget;
+          };
+
           function textCompact(s?: string | null, max = 200): string | undefined {
             if (!s) return undefined;
             const v = s.replace(/\s+/g, ' ').trim();
@@ -902,67 +1483,185 @@ async function computeFastestRoute(payload: { origin: string; destination: strin
             if (m) return parseFloat(m[1].replace(',', '.'));
             return undefined;
           }
-          function extractRoutes(): { durationMin: number; distanceKm?: number; text?: string; mode?: string; modeLabel?: string }[] {
-            const results: { durationMin: number; distanceKm?: number; text?: string }[] = [];
-            const nodes = Array.from(document.querySelectorAll('*')) as HTMLElement[];
-            for (const el of nodes) {
-              const txt = textCompact(el.innerText, 300);
-              if (!txt) continue;
-              if (!/(\d+\s*h\s*\d+\s*min|\d+\s*min)/i.test(txt)) continue;
-              const dur = parseDuration(txt);
-              let dist = parseDistance(txt);
-              if (typeof dist !== 'number' && el.parentElement) {
-                const pTxt = textCompact(el.parentElement.innerText, 300) || '';
-                dist = parseDistance(pTxt);
+          const durationPattern = /((\d+\s*h\s*\d+\s*min)|(\d+\s*h(?!\w))|(\d+\s*min))/i;
+
+          const gatherTexts = (element?: Element | null, max = 260): string[] => {
+            if (!element) return [];
+            const list: string[] = [];
+            const push = (value?: string | null, limit = max) => {
+              const normalized = textCompact(value, limit);
+              if (normalized && !list.includes(normalized)) list.push(normalized);
+            };
+            if (element instanceof HTMLElement) {
+              push(element.innerText, 320);
+              push(element.getAttribute('aria-label'), 220);
+              push(element.getAttribute('title'), 220);
+              for (const attr of Array.from(element.attributes)) {
+                if (attr.name.startsWith('data-')) push(attr.value, 200);
               }
-              if (!dur) continue;
-              results.push({ durationMin: dur, distanceKm: dist, text: txt });
+            } else {
+              push(element.textContent, 320);
             }
+            return list;
+          };
+
+          const pickDuration = (texts: string[]): number | undefined => {
+            for (const text of texts) {
+              const dur = parseDuration(text);
+              if (typeof dur === 'number') return dur;
+            }
+            return undefined;
+          };
+
+          const pickDistance = (texts: string[]): number | undefined => {
+            for (const text of texts) {
+              const dist = parseDistance(text);
+              if (typeof dist === 'number') return dist;
+            }
+            return undefined;
+          };
+
+          function extractRoutes(): { durationMin: number; distanceKm?: number; text?: string; mode?: string; modeLabel?: string }[] {
+        const base = readNetworkRoutes().map((item) => ({ ...item, mode: undefined as string | undefined, modeLabel: undefined as string | undefined }));
+            const seenKeys = new Set(base.map((item) => `${item.mode ?? 'default'}|${item.durationMin}|${item.distanceKm ?? ''}`));
+            const nodes = Array.from(document.querySelectorAll('*')) as HTMLElement[];
+            const results: { durationMin: number; distanceKm?: number; text?: string; mode?: string; modeLabel?: string }[] = [...base];
+            const seenPairs = new Set<string>(base.map((item) => `${item.durationMin}|${item.distanceKm ?? ''}`));
+            for (const el of nodes) {
+              const texts: string[] = [];
+              const merge = (src: Element | null | undefined, max = 260) => {
+                if (!src) return;
+                for (const entry of gatherTexts(src, max)) {
+                  if (!texts.includes(entry)) texts.push(entry);
+                }
+              };
+              merge(el, 320);
+              merge(el.parentElement, 260);
+              merge(el.previousElementSibling, 200);
+              merge(el.nextElementSibling, 200);
+              if (texts.length === 0) continue;
+              const combined = texts.join(' • ');
+              if (!durationPattern.test(combined)) continue;
+              const dur = pickDuration(texts);
+              if (typeof dur !== 'number') continue;
+              let dist = pickDistance(texts);
+              if (typeof dist !== 'number' && el.parentElement) {
+                dist = pickDistance(gatherTexts(el.parentElement, 260));
+              }
+              const distanceKm = typeof dist === 'number' ? Math.round(dist * 100) / 100 : undefined;
+              const durationMin = Math.max(1, Math.round(dur));
+              const key = `${durationMin}|${distanceKm ?? ''}`;
+              if (seenPairs.has(key)) continue;
+              seenPairs.add(key);
+              const sample = texts[0] ?? combined;
+              const route = { durationMin, distanceKm, text: sample, mode: undefined, modeLabel: undefined };
+              const signature = `${route.mode ?? 'default'}|${route.durationMin}|${route.distanceKm ?? ''}`;
+              if (seenKeys.has(signature)) continue;
+              seenKeys.add(signature);
+              results.push(route);
+              if (results.length >= 20) break;
+            }
+            const dedup: { durationMin: number; distanceKm?: number; text?: string; mode?: string; modeLabel?: string }[] = [];
             const seen = new Set<string>();
-            const uniq = [] as { durationMin: number; distanceKm?: number; text?: string; mode?: string; modeLabel?: string }[];
-            for (const r of results.sort((a, b) => a.durationMin - b.durationMin)) {
-              const key = `${r.durationMin}|${r.distanceKm ?? ''}`;
+            for (const route of results.sort((a, b) => a.durationMin - b.durationMin)) {
+              const key = `${route.mode ?? 'default'}|${route.durationMin}|${route.distanceKm ?? ''}`;
               if (seen.has(key)) continue;
               seen.add(key);
-              uniq.push({ ...r, mode: undefined, modeLabel: undefined });
-              if (uniq.length >= 5) break;
+              dedup.push(route);
+              if (dedup.length >= 5) break;
             }
-            return uniq;
+            return dedup;
           }
           async function waitForRoutesUntil(
             extract: () => { durationMin: number; distanceKm?: number; text?: string; mode?: string; modeLabel?: string }[],
-            maxWaitMs = 60000
+            maxWaitMs?: number
           ): Promise<void> {
+            const limit = chooseWaitBudget(maxWaitMs);
             const start = Date.now();
             let lastCount = 0;
-            let lastChange = Date.now();
+            let lastStableAt = start;
             return new Promise((resolve) => {
-              const loop = () => {
-                const count = extract().length;
+              let settled = false;
+              let timeoutId: ReturnType<typeof setTimeout> | undefined;
+              let pollerId: ReturnType<typeof setInterval> | undefined;
+              let observer: MutationObserver | undefined;
+              let listener: ((event: Event) => void) | undefined;
+
+              const cleanup = () => {
+                if (observer) {
+                  observer.disconnect();
+                  observer = undefined;
+                }
+                if (timeoutId) {
+                  clearTimeout(timeoutId);
+                  timeoutId = undefined;
+                }
+                if (pollerId) {
+                  clearInterval(pollerId);
+                  pollerId = undefined;
+                }
+                if (listener) {
+                  window.removeEventListener('cometi:routes-updated', listener);
+                  listener = undefined;
+                }
+              };
+
+              const finish = () => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                resolve();
+              };
+
+              const check = () => {
+                if (settled) return;
+                const routes = extract();
+                const count = routes.length;
                 if (count !== lastCount) {
                   lastCount = count;
-                  lastChange = Date.now();
+                  lastStableAt = Date.now();
                 }
-                if (lastCount > 0 && Date.now() - lastChange > 1200) {
-                  resolve();
+                if (count > 0 && Date.now() - lastStableAt >= 600) {
+                  finish();
                   return;
                 }
-                if (Date.now() - start > maxWaitMs) {
-                  resolve();
-                  return;
+                if (Date.now() - start > limit) {
+                  finish();
                 }
-                setTimeout(loop, 300);
               };
-              loop();
+
+          try {
+            observer = new MutationObserver(() => {
+              check();
             });
+            observer.observe(document.body, { childList: true, subtree: true });
+          } catch {
+            observer = undefined;
           }
-          await waitForRoutesUntil(extractRoutes, 90000);
+
+          pollerId = setInterval(check, 200);
+          listener = () => {
+            check();
+          };
+          window.addEventListener('cometi:routes-updated', listener);
+          timeoutId = setTimeout(finish, limit);
+          check();
+        });
+      }
+          await waitForRoutesUntil(extractRoutes, 32000);
           const routes = extractRoutes();
           const best = routes[0] ?? null;
           return { routes, best, pageUrl: window.location.href };
         },
       });
-      await logToBackend('route', 'info', 'done', { pageUrl: re?.pageUrl, routes: re?.routes?.length ?? 0, best: re?.best });
+      await logToBackend('route', 'info', 'done', {
+        pageUrl: re?.pageUrl,
+        routes: re?.routes?.length ?? 0,
+        best: re?.best,
+        loadMs: dirTab.loadMs,
+        waitBudget: fallbackWaitBudget,
+        reusedTab: dirTab.reused,
+      });
       if (!re || (re.routes ?? []).length === 0) {
         await logToBackend('route', 'warn', 'no_routes');
       }

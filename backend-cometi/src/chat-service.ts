@@ -90,6 +90,13 @@ export async function processChatRequest(
 
   const content = data?.choices?.[0]?.message?.content?.trim();
 
+  const shouldPersistAssistant = (text: string | null | undefined) => {
+    const trimmed = text?.trim() ?? '';
+    if (!trimmed) return false;
+    if (/^<\s*ROUTE\b/i.test(trimmed)) return false;
+    return true;
+  };
+
   if (!content) {
     return {
       status: 500,
@@ -106,7 +113,9 @@ export async function processChatRequest(
       if (lastUser?.content) {
         await appendUserMessage(payload.chatId, lastUser.content);
       }
-      await appendAssistantMessage(payload.chatId, content);
+      if (shouldPersistAssistant(content)) {
+        await appendAssistantMessage(payload.chatId, content);
+      }
     } catch (e) {
       console.warn('[chat] persist failed:', e);
     }

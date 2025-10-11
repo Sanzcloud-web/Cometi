@@ -10,11 +10,16 @@ type Props = {
 
 export function HistorySidebar({ isOpen, chats, onSelect, onClose }: Props): JSX.Element {
   return (
-    <div className={`transition-all duration-200 ${isOpen ? 'w-64' : 'w-0'} overflow-hidden bg-[#FCFCF9] rounded-xl`}> 
+    <div
+      className={`transition-all duration-200 min-w-0 ${
+        isOpen ? 'w-64 opacity-100 pointer-events-auto' : 'w-0 opacity-0 pointer-events-none'
+      } overflow-hidden bg-[#FCFCF9] rounded-xl`}
+      aria-hidden={!isOpen}
+    >
       <div className="h-full flex flex-col">
         <div className="flex items-center justify-between px-3 py-2 ">
           <div className="text-sm font-medium opacity-80">Historique</div>
-          <Button variant="ghost" onClick={onClose} className="h-7 px-2 text-xs">Fermer</Button>
+          <Button variant="ghost" onClick={onClose} className="h-7 px-2 text-xs border border-[#C7CDCD] rounded-full">Fermer</Button>
         </div>
         <div className="flex-1 overflow-auto">
           {chats.length === 0 ? (
@@ -24,7 +29,7 @@ export function HistorySidebar({ isOpen, chats, onSelect, onClose }: Props): JSX
               {chats.map((c) => (
                 <li key={c.id}>
                   <button
-                    className="w-full text-left px-3 py-2 hover:bg-neutral-100/70 dark:hover:bg-neutral-800/40"
+                    className="w-full text-left px-3 py-2 hover:bg-[#ECECEC] rounded-md"
                     onClick={() => onSelect(c.id)}
                     title={c.title ?? ''}
                   >
